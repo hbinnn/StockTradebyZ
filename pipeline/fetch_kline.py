@@ -1,7 +1,7 @@
 """
 fetch_kline.py
 ~~~~~~~~~~~~~~
-使用 AkShare 从东方财富抓取 A 股日线 K 线数据。
+使用 Baostock 抓取 A 股日线 K 线数据（前复权）。
 
 用法：
     python pipeline/fetch_kline.py
@@ -11,12 +11,17 @@ fetch_kline.py
     默认读取 config/fetch_kline.yaml。
 
 依赖：
-    pip install akshare pandas pyyaml tqdm
+    pip install baostock pandas pyyaml tqdm
+
+数据源：
+    Baostock → 中国结算（BSGS）
+    - 无需注册/Token，完全免费
+    - 支持日线/周线/月线/分钟线
+    - 支持前复权(qfq)/后复权(hfq)/不复权
 
 注意：
-    - 无需注册/Token，完全免费
-    - 东方财富数据源，请遵守访问频率限制
-    - 默认每次请求间隔 1.5 秒，勿随意降低
+    Baostock 对高频请求有限制，默认每次请求间隔 1 秒。
+    建议不要并发太高，否则可能被临时限制。
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import yaml
@@ -37,14 +42,14 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
-# AkShare 依赖 urllib3 v2，需要 OpenSSL 1.1.1+
 try:
-    import akshare as ak
+    import baostock as bs
 except ImportError:
-    print("[ERROR] 请先安装 AkShare：pip install akshare", file=sys.stderr)
+    print("[ERROR] 请先安装 baostock：pip install baostock", file=sys.stderr)
     sys.exit(1)
 
 # --------------------------- 全局日志配置 --------------------------- #
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_LOG_DIR = _PROJECT_ROOT / "data" / "logs"
 
@@ -55,8 +60,7 @@ def _resolve_cfg_path(path_like: str, base_dir: Path = _PROJECT_ROOT) -> Path:
 
 
 def _default_log_path() -> Path:
-    today = dt.date.today().strftime("%Y-%m-%d")
-    return _DEFAULT_LOG_DIR / f"fetch_{today}.log"
+    return _DEFAULT_LOG_DIR / f"fetch_{dt.date.today().strftime('%Y-%m-%d')}.log"
 
 
 def setup_logging(log_path: Optional[Path] = None) -> None:
@@ -76,21 +80,15 @@ def setup_logging(log_path: Optional[Path] = None) -> None:
 
 logger = logging.getLogger("fetch_from_stocklist")
 
-# --------------------------- 限流/封禁处理 --------------------------- #
-# 东方财富对频繁访问比较敏感，建议不要随意降低此值
-DEFAULT_REQUEST_DELAY = 1.5  # 每次请求间隔（秒）
-COOLDOWN_SECS = 600          # 被封禁后冷却时间（秒）
+# --------------------------- 限流配置 --------------------------- #
 
+DEFAULT_REQUEST_DELAY = 1.0   # 每次请求间隔（秒）
 BAN_PATTERNS = (
-    "访问频繁", "请稍后", "超过频率", "频繁访问",
-    "too many requests", "429",
-    "forbidden", "403",
-    "max retries exceeded",
-    "net Error", "网络错误",
-    "remotedisconnected",
-    "connection aborted",
-    "connection reset",
-    "connection refused",
+    "error_code': '10103012",
+    "error_msg': '请求频率过快",
+    "系统繁忙",
+    "too many",
+    "频率",
 )
 
 
@@ -100,60 +98,83 @@ def _looks_like_ban(exc: Exception) -> bool:
 
 
 class RateLimitError(RuntimeError):
-    """命中限流/封禁，需长时间冷却后重试。"""
+    """命中频率限制，需冷却后重试。"""
     pass
 
 
-def _cool_sleep(base_seconds: int) -> None:
+def _cool_sleep(base: float) -> None:
     jitter = random.uniform(0.9, 1.2)
-    sleep_s = max(1, int(base_seconds * jitter))
-    logger.warning("疑似被限流/封禁，进入冷却期 %d 秒...", sleep_s)
+    sleep_s = max(1, base * jitter)
+    logger.warning("疑似频率限制，进入冷却期 %d 秒...", int(sleep_s))
     time.sleep(sleep_s)
 
 
-# --------------------------- AkShare K线抓取 --------------------------- #
+# --------------------------- Baostock K线抓取 --------------------------- #
 
-# AkShare 列名映射（东方财富中文列名 → 内部标准列名）
-_COLUMN_MAP = {
-    "日期": "date",
-    "开盘": "open",
-    "收盘": "close",
-    "最高": "high",
-    "最低": "low",
-    "成交量": "volume",
+# 复权标志映射
+_ADJUSTFLAG_MAP = {
+    "qfq": "2",   # 前复权
+    "hfq": "1",   # 后复权
+    "": "3",      # 不复权
 }
 
 
-def _get_kline_akshare(code: str, start: str, end: str) -> pd.DataFrame:
+def _to_baostock_code(code: str) -> str:
     """
-    使用 AkShare 抓取单支股票的日线数据（前复权）。
-    AkShare 的 stock_zh_a_hist 直接使用 6 位纯数字代码。
+    将 6 位代码转换为 baostock 格式。
+    - 60/68 开头 → sh.600xxx（上交所）
+    - 4/8 开头   → sh.4xxxx / sh.8xxxx（北交所-上交所）
+    - 其他       → sz.00xxxx（深交所）
+    - 4/8 开头   → bj.4xxxx / bj.8xxxx（北交所）
     """
-    try:
-        df = ak.stock_zh_a_hist(
-            symbol=code.zfill(6),        # 6 位代码，如 '000001'
-            period="daily",
-            start_date=start,            # YYYYMMDD
-            end_date=end,
-            adjust="qfq",               # 前复权
-        )
-    except Exception as e:
-        if _looks_like_ban(e):
-            raise RateLimitError(str(e)) from e
-        raise
+    code = str(code).zfill(6)
+    if code.startswith(("60", "68")):
+        return f"sh.{code}"
+    elif code.startswith(("4", "8")):
+        return f"bj.{code}"
+    else:
+        return f"sz.{code}"
 
-    if df is None or df.empty:
-        return pd.DataFrame()
 
-    # 列名映射
-    df = df.rename(columns=_COLUMN_MAP)
+def _get_kline_baostock(
+    code: str,
+    start: str,
+    end: str,
+    adjustflag: str = "qfq",
+) -> pd.DataFrame:
+    """
+    使用 Baostock 获取单支股票的日线数据。
+    代码示例: 'sh.600519'（茅台）
+    日期格式: '2024-01-01'
+    """
+    bs_code = _to_baostock_code(code)
 
-    # 只保留需要的列（与 pipeline_io 等模块保持一致）
-    needed = ["date", "open", "close", "high", "low", "volume"]
-    for col in needed:
-        if col not in df.columns:
-            df[col] = None
-    df = df[needed].copy()
+    # 转换日期格式 YYYYMMDD → YYYY-MM-DD
+    start_fmt = f"{start[:4]}-{start[4:6]}-{start[6:8]}" if len(start) == 8 else start
+    end_fmt = f"{end[:4]}-{end[4:6]}-{end[6:8]}" if len(end) == 8 else end
+
+    adj_flag = _ADJUSTFLAG_MAP.get(adjustflag, "2")
+
+    rs = bs.query_history_k_data_plus(
+        bs_code,
+        "date,open,close,high,low,volume",
+        start_date=start_fmt,
+        end_date=end_fmt,
+        frequency="d",
+        adjustflag=adj_flag,
+    )
+
+    if rs.error_code != "0":
+        raise RuntimeError(f"Baostock 查询失败: {rs.error_msg}")
+
+    data_list: List[tuple] = []
+    while rs.error_code == "0" and rs.next():
+        data_list.append(rs.get_row_data())
+
+    if not data_list:
+        return pd.DataFrame(columns=["date", "open", "close", "high", "low", "volume"])
+
+    df = pd.DataFrame(data_list, columns=["date", "open", "close", "high", "low", "volume"])
 
     # 类型转换
     df["date"] = pd.to_datetime(df["date"])
@@ -176,8 +197,7 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
 
 # --------------------------- 读取 stocklist.csv & 过滤板块 --------------------------- #
 
-def _filter_by_boards_stocklist(df: pd.DataFrame, exclude_boards: set) -> pd.DataFrame:
-    """根据 ts_code 过滤板块（创业板/科创板/北交所）。"""
+def _filter_by_boards_stocklist(df: pd.DataFrame, exclude_boards: Set[str]) -> pd.DataFrame:
     ts = df["ts_code"].astype(str).str.upper()
     num = ts.str.extract(r"(\d{6})", expand=False).str.zfill(6)
     mask = pd.Series(True, index=df.index)
@@ -192,7 +212,7 @@ def _filter_by_boards_stocklist(df: pd.DataFrame, exclude_boards: set) -> pd.Dat
     return df[mask].copy()
 
 
-def load_codes_from_stocklist(stocklist_csv: Path, exclude_boards: set) -> List[str]:
+def load_codes_from_stocklist(stocklist_csv: Path, exclude_boards: Set[str]) -> List[str]:
     df = pd.read_csv(stocklist_csv)
     df = _filter_by_boards_stocklist(df, exclude_boards)
     codes = df["symbol"].astype(str).str.zfill(6).tolist()
@@ -202,24 +222,21 @@ def load_codes_from_stocklist(stocklist_csv: Path, exclude_boards: set) -> List[
     return codes
 
 
-# --------------------------- 单只抓取（全量覆盖保存） --------------------------- #
+# --------------------------- 单只抓取 --------------------------- #
 
 def fetch_one(
     code: str,
     start: str,
     end: str,
     out_dir: Path,
+    adjustflag: str = "qfq",
     request_delay: float = DEFAULT_REQUEST_DELAY,
 ) -> bool:
-    """
-    抓取单支股票数据并保存为 CSV。
-    返回 True 表示成功，False 表示失败。
-    """
     csv_path = out_dir / f"{code}.csv"
 
     for attempt in range(1, 4):
         try:
-            new_df = _get_kline_akshare(code, start, end)
+            new_df = _get_kline_baostock(code, start, end, adjustflag)
             if new_df.empty:
                 logger.debug("%s 无数据，生成空表。", code)
                 new_df = pd.DataFrame(columns=["date", "open", "close", "high", "low", "volume"])
@@ -227,17 +244,13 @@ def fetch_one(
             new_df.to_csv(csv_path, index=False)
             return True
 
-        except RateLimitError:
-            logger.error("%s 第 %d 次抓取疑似被封禁，沉睡 %d 秒", code, attempt, COOLDOWN_SECS)
-            _cool_sleep(COOLDOWN_SECS)
-
         except Exception as e:
             if _looks_like_ban(e):
-                logger.error("%s 第 %d 次抓取疑似被封禁，沉睡 %d 秒", code, attempt, COOLDOWN_SECS)
-                _cool_sleep(COOLDOWN_SECS)
+                logger.error("%s 第 %d 次疑似频率限制，沉睡 %d 秒", code, attempt, int(request_delay * 60))
+                _cool_sleep(request_delay * 60)
             else:
                 silent_seconds = 30 * attempt
-                logger.info("%s 第 %d 次抓取失败，%d 秒后重试：%s", code, attempt, silent_seconds, e)
+                logger.info("%s 第 %d 次失败，%d 秒后重试：%s", code, attempt, silent_seconds, e)
                 time.sleep(silent_seconds)
 
     logger.error("%s 三次抓取均失败，已跳过！", code)
@@ -249,7 +262,7 @@ def fetch_one(
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "fetch_kline.yaml"
 
 
-def _load_config(config_path: Path = _CONFIG_PATH) -> dict:
+def _load_config(config_path: Path = _CONFIG_PATH) -> Dict:
     if not config_path.exists():
         raise FileNotFoundError(f"找不到配置文件：{config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
@@ -269,10 +282,15 @@ def main(log_path: Optional[Path] = None):
     setup_logging(log_path)
     logger.info("日志文件：%s", Path(log_path).resolve())
 
-    # 读取请求间隔配置（秒）
     request_delay = float(cfg.get("request_delay", DEFAULT_REQUEST_DELAY))
-    if request_delay < 1.0:
-        logger.warning("请求间隔 %.1f 秒过小，东方财富可能封禁 IP，建议 ≥1.0 秒", request_delay)
+    adjustflag = str(cfg.get("adjustflag", "qfq"))
+
+    # Baostock 全局登录（会话复用）
+    lg = bs.login()
+    if lg.error_code != "0":
+        logger.error("Baostock 登录失败：%s", lg.error_msg)
+        sys.exit(1)
+    logger.info("Baostock 登录成功")
 
     # 日期解析
     raw_start = str(cfg.get("start", "20190101"))
@@ -285,41 +303,42 @@ def main(log_path: Optional[Path] = None):
 
     # 读取股票池
     stocklist_path = _resolve_cfg_path(cfg.get("stocklist", "./pipeline/stocklist.csv"))
-    exclude_boards = set(cfg.get("exclude_boards") or [])
+    exclude_boards: Set[str] = set(cfg.get("exclude_boards") or [])
     codes = load_codes_from_stocklist(stocklist_path, exclude_boards)
 
     if not codes:
         logger.error("stocklist 为空或被过滤后无代码，请检查。")
+        bs.logout()
         sys.exit(1)
 
     logger.info(
-        "开始抓取 %d 支股票 | 数据源:AkShare/东方财富(日线,qfq) | "
+        "开始抓取 %d 支股票 | 数据源:Baostock | 复权:%s | "
         "间隔:%.1f秒 | 日期:%s → %s | 排除:%s",
-        len(codes), request_delay, start, end, ",".join(sorted(exclude_boards)) or "无",
+        len(codes), adjustflag, request_delay, start, end,
+        ",".join(sorted(exclude_boards)) or "无",
     )
 
-    # 多线程抓取（每个线程内部自己控制请求间隔）
-    workers = int(cfg.get("workers", 4))  # 默认降为 4，避免东方财富封禁
-    if workers > 4:
-        logger.warning("并发数 > 4 会增加被东方财富封禁的风险，建议 ≤ 4")
-
+    workers = int(cfg.get("workers", 4))
     success_count = 0
     fail_count = 0
 
-    def _fetch_with_delay(code):
+    def _fetch_with_delay(code: str) -> bool:
         nonlocal success_count, fail_count
-        time.sleep(random.uniform(request_delay * 0.5, request_delay * 1.5))
-        ok = fetch_one(code, start, end, out_dir, request_delay)
+        time.sleep(random.uniform(request_delay * 0.8, request_delay * 1.2))
+        ok = fetch_one(code, start, end, out_dir, adjustflag, request_delay)
         if ok:
             success_count += 1
         else:
             fail_count += 1
         return ok
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(_fetch_with_delay, code): code for code in codes}
-        for f in tqdm(as_completed(futures), total=len(futures), desc="下载进度"):
-            pass  # 结果在全局计数器里
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_fetch_with_delay, code): code for code in codes}
+            for f in tqdm(as_completed(futures), total=len(futures), desc="下载进度"):
+                pass
+    finally:
+        bs.logout()
 
     logger.info("全部任务完成 | 成功:%d | 失败:%d | 数据已保存至 %s",
                 success_count, fail_count, out_dir.resolve())
