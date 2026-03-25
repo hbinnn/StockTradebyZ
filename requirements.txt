@@ -6,4 +6,5 @@ protobuf==7.34.0
 PyYAML==6.0.3
 streamlit==1.55.0
 tqdm==4.67.3
-tushare==1.4.25
+akshare>=1.14.0
+zhipuai>=2.0.0
