@@ -13,8 +13,11 @@ output_dir: data/review
 # 提示词文件
 prompt_path: agent/prompt.md
 
-# Gemini 模型名称
-model: gemini-3.1-pro-preview
+# 智谱 AI 模型名称
+# 可选：
+#   glm-4v-flash   - GLM-4V-Flash（推荐，速度快，费用低）
+#   glm-4v         - GLM-4V（标准版，效果更好但较慢）
+model: glm-4v-flash
 
 # 相邻 API 调用间隔（秒）
 request_delay: 5
