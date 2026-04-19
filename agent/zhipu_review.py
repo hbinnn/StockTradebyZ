@@ -32,7 +32,7 @@ import base64
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Union
 
 import yaml
 
@@ -44,7 +44,7 @@ from base_reviewer import BaseReviewer
 _ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_CONFIG_PATH = _ROOT / "config" / "zhipu_review.yaml"
 
-DEFAULT_CONFIG: dict[str, Any] = {
+DEFAULT_CONFIG: Dict[str, Any] = {
     # 路径参数（相对路径默认基于项目根目录）
     "candidates": "data/candidates/candidates_latest.json",
     "kline_dir": "data/kline",
@@ -58,12 +58,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def _resolve_cfg_path(path_like: str | Path, base_dir: Path = _ROOT) -> Path:
+def _resolve_cfg_path(path_like: Union[str, Path], base_dir: Path = _ROOT) -> Path:
     p = Path(path_like)
     return p if p.is_absolute() else (base_dir / p)
 
 
-def load_config(config_path: Path | None = None) -> dict[str, Any]:
+def load_config(config_path: Union[Path, None] = None) -> Dict[str, Any]:
     cfg_path = config_path or _DEFAULT_CONFIG_PATH
     if not cfg_path.exists():
         raise FileNotFoundError(f"找不到配置文件：{cfg_path}")
