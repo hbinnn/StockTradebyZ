@@ -1,0 +1,21 @@
+# ============================================================
+# zhipu_review.yaml 配置文件
+# ============================================================
+
+# 路径参数（相对于项目根目录）
+candidates: "data/candidates/candidates_latest.json"
+kline_dir: "data/kline"
+output_dir: "data/review"
+prompt_path: "agent/prompt.md"
+
+# 智谱模型参数
+model: "glm-4.6v"
+
+# 请求间隔（秒），防止触发频率限制
+request_delay: 5
+
+# 跳过已存在的评分文件（避免重复分析）
+skip_existing: false
+
+# 推荐门槛：总分 >=此值 才进入最终推荐
+suggest_min_score: 4.0

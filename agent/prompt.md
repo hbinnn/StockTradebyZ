@@ -190,12 +190,22 @@
 
 ---
 
-# 三、权重
+# 三、权重与总分计算
 
-trend_structure：0.20
-price_position：0.20
-volume_behavior：0.30
-previous_abnormal_move：0.30
+**权重：**
+- trend_structure：0.20
+- price_position：0.20
+- volume_behavior：0.30
+- previous_abnormal_move：0.30
+
+**总分计算公式：**
+```
+total_score = trend_structure × 0.20 + price_position × 0.20 + volume_behavior × 0.30 + previous_abnormal_move × 0.30
+```
+
+**总分范围：1.0 ~ 5.0**
+
+每个维度1-5分，乘以权重后求和，最大5分。
 
 ---
 
@@ -273,7 +283,7 @@ signal_reasoning
 "volume_behavior": 1,
 "previous_abnormal_move": 1
 },
-"total_score": 1.0,
+"total_score": 3.2,
 "signal_type": "trend_start",
 "verdict": "WATCH",
 "comment": "一句中文交易员点评"
