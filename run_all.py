@@ -3,11 +3,14 @@ run_all.py
 ~~~~~~~~~~
 一键运行完整交易选股流程：
 
-  步骤 1  pipeline/fetch_kline.py   — 拉取最新 K 线数据
-  步骤 2  pipeline/cli.py preselect — 量化初选，生成候选列表
-  步骤 3  dashboard/export_kline_charts.py — 导出候选股 K 线图
-  步骤 4  agent/gemini_review.py    — Gemini 图表分析评分
-  步骤 5  打印推荐购买的股票
+  步骤 1  pipeline/fetch_kline.py              — 拉取最新 K 线数据
+  步骤 2  pipeline/cli.py preselect            — 量化初选，生成候选列表
+  步骤 3  dashboard/export_kline_charts.py     — 导出候选股 K 线图
+  步骤 4  agent/zhipu_review.py                — 智谱 GLM-4.6V 图表分析评分
+  步骤 5  dashboard/overlay_score_to_chart.py  — 将评分叠加到 K 线图
+  步骤 6  similarity/patternMatcher.py         — 完美图形相似度匹配
+  步骤 7  dashboard/overlay_pattern_to_chart.py — 将图形匹配标注叠加到 K 线图
+  步骤 8  export_for_eastmoney.py              — 导出东方财富可导入文件
 
 用法：
     python run_all.py
@@ -97,7 +100,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--start-from", type=int, default=1, metavar="N",
-        help="从第 N 步开始执行（1~4），跳过前面的步骤",
+        help="从第 N 步开始执行（1~8），跳过前面的步骤",
     )
     args = parser.parse_args()
 
@@ -109,34 +112,62 @@ def main() -> None:
     # ── 步骤 1：拉取 K 线数据 ─────────────────────────────────────────
     if start <= 1:
         _run(
-            "1/4  拉取 K 线数据（fetch_kline）",
+            "1/8  拉取 K 线数据（fetch_kline）",
             [PYTHON, "-m", "pipeline.fetch_kline"],
         )
 
     # ── 步骤 2：量化初选 ─────────────────────────────────────────────
     if start <= 2:
         _run(
-            "2/4  量化初选（cli preselect）",
+            "2/8  量化初选（cli preselect）",
             [PYTHON, "-m", "pipeline.cli", "preselect"],
         )
 
     # ── 步骤 3：导出 K 线图 ──────────────────────────────────────────
     if start <= 3:
         _run(
-            "3/4  导出 K 线图（export_kline_charts）",
+            "3/8  导出 K 线图（export_kline_charts）",
             [PYTHON, str(ROOT / "dashboard" / "export_kline_charts.py")],
         )
 
-    # ── 步骤 4：Gemini 图表分析 ──────────────────────────────────────
+    # ── 步骤 4：智谱 GLM 图表分析 ──────────────────────────────────────
     if start <= 4:
         _run(
-            "4/4  Gemini 图表分析（gemini_review）",
-            [PYTHON, str(ROOT / "agent" / "gemini_review.py")],
+            "4/8  智谱 GLM 图表分析（zhipu_review）",
+            [PYTHON, str(ROOT / "agent" / "zhipu_review.py")],
         )
 
-    # ── 步骤 5：打印推荐结果 ─────────────────────────────────────────
+    # ── 步骤 5：评分叠加到 K 线图 ────────────────────────────────────
+    if start <= 5:
+        _run(
+            "5/8  评分叠加到 K 线图（overlay_score_to_chart）",
+            [PYTHON, str(ROOT / "dashboard" / "overlay_score_to_chart.py")],
+        )
+
+    # ── 步骤 6：完美图形相似度匹配 ───────────────────────────────────
+    if start <= 6:
+        _run(
+            "6/8  完美图形相似度匹配（patternMatcher）",
+            [PYTHON, "-m", "similarity.patternMatcher"],
+        )
+
+    # ── 步骤 7：图形匹配标注叠加 ──────────────────────────────────────
+    if start <= 7:
+        _run(
+            "7/8  图形匹配标注叠加（overlay_pattern_to_chart）",
+            [PYTHON, str(ROOT / "dashboard" / "overlay_pattern_to_chart.py")],
+        )
+
+    # ── 步骤 8：导出东方财富文件 ──────────────────────────────────────
+    if start <= 8:
+        _run(
+            "8/8  导出东方财富文件（export_for_eastmoney）",
+            [PYTHON, str(ROOT / "export_for_eastmoney.py")],
+        )
+
+    # ── 步骤 9：打印推荐结果 ─────────────────────────────────────────
     print(f"\n{'='*60}")
-    print("[步骤] 5/5  推荐购买的股票")
+    print("[步骤] 9/9  推荐购买的股票")
     _print_recommendations()
 
 

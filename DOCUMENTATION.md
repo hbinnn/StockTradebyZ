@@ -4,21 +4,47 @@
 
 AgentTrader 是一个面向 A 股的半自动选股系统，结合量化规则与 LLM 图表分析进行股票筛选。
 
-### 核心流程（4步流水线）
+### 核心流程（8步流水线）
 
 ```
-数据下载 → 量化初选 → K线图导出 → AI图表复评 → 叠加评分到K线图
+数据下载 → 量化初选 → K线图导出 → AI图表复评 → 叠加评分 → 图形匹配 → 标注叠加 → 导出东方财富
 ```
 
 1. **pipeline/fetch_kline.py** - 从 Tushare 下载日线数据（前复权）到 `data/raw/*.csv`
 2. **pipeline/cli.py preselect** - 运行量化初选策略生成 `data/candidates/`
 3. **dashboard/export_kline_charts.py** - 将候选股票K线图导出到 `data/kline/{日期}/*.jpg`
 4. **agent/zhipu_review.py** - 智谱 GLM-4.6V 分析图表，评分输出到 `data/review/{日期}/`
-5. **dashboard/overlay_score_to_chart.py** - 将评分结果叠加到K线图上
+5. **dashboard/overlay_score_to_chart.py** - 将评分结果叠加到K线图
+6. **similarity/patternMatcher.py** - 完美图形相似度匹配
+7. **dashboard/overlay_pattern_to_chart.py** - 将图形匹配标注叠加到K线图
+8. **export_for_eastmoney.py** - 导出东方财富可导入文件
 
 ---
 
-## 二、环境配置
+## 二、术语表
+
+### 技术指标
+
+| 指标 | 代码变量 | 说明 |
+|------|----------|------|
+| **白线** | `zxdq` | 知行短期线，双指数移动平均（span=10），代表短期趋势 |
+| **黄线** | `zxdkx` | 知行多空线，四均线均值 MA(14,28,57,114)/4，代表中长期趋势 |
+| **KDJ** | `k,d,j` | 随机指标，用于判断超跌反弹机会 |
+| **砖型图** | `brick` | 基于通达信 VAR6A 公式计算的砖型图 |
+| **MA** | `ma5,ma10...` | 移动平均线 |
+
+### K线图元素
+
+| 元素 | 颜色 | 说明 |
+|------|------|------|
+| K线（涨） | 红色 `#dc3545` | 收盘价 > 开盘价 |
+| K线（跌） | 绿色 `#28a745` | 收盘价 < 开盘价 |
+| 白线 | 橙色 `#e67e22` | zxdq 知行短期线 |
+| 黄线 | 蓝色 `#2980b9` | zxdkx 知行多空线 |
+
+---
+
+## 三、环境配置
 
 ### 2.1 系统要求
 
@@ -99,10 +125,19 @@ python -m pipeline.cli preselect --date 2026-04-18
 python dashboard/export_kline_charts.py
 
 # 步骤4：智谱图表复评
-export ZHIPU_API_KEY='你的智谱key' && python agent/zhipu_review.py
+python agent/zhipu_review.py
 
 # 步骤5：叠加评分到K线图
 python dashboard/overlay_score_to_chart.py
+
+# 步骤6：完美图形相似度匹配
+python -m similarity.patternMatcher
+
+# 步骤7：图形匹配标注叠加
+python dashboard/overlay_pattern_to_chart.py
+
+# 步骤8：导出东方财富文件
+python export_for_eastmoney.py
 ```
 
 ---

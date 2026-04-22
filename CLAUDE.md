@@ -51,14 +51,16 @@ python dashboard/export_kline_charts.py
 python agent/zhipu_review.py
 python agent/zhipu_review.py --config config/zhipu_review.yaml
 
-# 步骤4（Gemini替代方案）
-python agent/gemini_review.py
-python agent/gemini_review.py --config config/gemini_review.yaml
-
 # 步骤5：评分叠加到K线图
 python dashboard/overlay_score_to_chart.py
 
-# 导出东方财富格式
+# 步骤6：完美图形相似度匹配
+python -m similarity.patternMatcher
+
+# 步骤7：图形匹配标注叠加
+python dashboard/overlay_pattern_to_chart.py
+
+# 步骤8：导出东方财富格式
 python export_for_eastmoney.py
 python export_for_eastmoney.py --min-score 4.5  # 调整评分门槛
 python export_for_eastmoney.py --format csv    # 导出CSV格式
@@ -91,16 +93,21 @@ pip install kaleido
 | `data/candidates/` | 初选候选列表（JSON） |
 | `data/kline/{日期}/` | 导出的 K 线图表（含评分叠加） |
 | `data/review/{日期}/` | AI 复评结果（每只股票 JSON + suggestion.json） |
+| `data/pattern_matched/` | 完美图形匹配结果 |
+| `data/eastmoney/` | 东方财富导出文件 |
 | `data/logs/` | 日志文件 |
 
 ## 架构设计
 
-### 数据流程（5步流水线）
+### 数据流程（8步流水线）
 1. **pipeline/fetch_kline.py** - 从 Tushare 下载日线数据（前复权）到 `data/raw/*.csv`
 2. **pipeline/cli.py preselect** - 运行量化初选策略（B1: KDJ+知行均线，或砖型图）生成 `data/candidates/`
 3. **dashboard/export_kline_charts.py** - 将候选股票K线图导出到 `data/kline/{日期}/*.jpg`
 4. **agent/zhipu_review.py** - 智谱 GLM-4.6V 分析图表，评分输出到 `data/review/{日期}/`
 5. **dashboard/overlay_score_to_chart.py** - 将评分结果叠加到K线图下方
+6. **similarity/patternMatcher.py** - 完美图形相似度匹配
+7. **dashboard/overlay_pattern_to_chart.py** - 将图形匹配标注叠加到K线图
+8. **export_for_eastmoney.py** - 导出东方财富可导入文件
 
 ### 目录结构
 - **pipeline/** - 数据抓取与量化初选逻辑
@@ -111,6 +118,8 @@ pip install kaleido
   - `cli.py` - preselect 命令行入口
   - `schemas.py` - Candidate/CandidateRun 数据类
   - `stocklist.csv` - 股票清单（含 5487 只 A 股）
+- **similarity/** - 完美图形相似度比对
+  - `patternMatcher.py` - 特征提取与相似度计算
 - **dashboard/** - 图表渲染与导出
   - `components/charts.py` - 基于 Plotly 的日线/周线图表生成
   - `export_kline_charts.py` - 批量图表导出
@@ -175,6 +184,14 @@ eastmoney_{策略名}_{日期}.txt
 
 判定规则：PASS(≥4.0) / WATCH(3.2~4.0) / REJECT(<3.2)
 
+## 术语表
+
+| 术语 | 代码变量 | 说明 |
+|------|----------|------|
+| **白线** | `zxdq` | 知行短期线，双指数移动平均（span=10），橙色线 |
+| **黄线** | `zxdkx` | 知行多空线，四均线均值 MA(14,28,57,114)/4，蓝色线 |
+| **KDJ** | `k,d,j` | 随机指标 |
+
 ## Git 安全规范
 
 **强制要求：通过 git 提交代码前必须检查，不允许将敏感信息提交到 GitHub。**
@@ -183,13 +200,15 @@ eastmoney_{策略名}_{日期}.txt
 - API Key（`ZHIPU_API_KEY`、`GEMINI_API_KEY`）
 - Token（`TUSHARE_TOKEN`）
 - 任何形式的密钥、密码、凭证
+- 脚本文件中硬编码的 API Key 和 Token（如 `run_with_keys.sh`）
 
 ### 检查方法
-提交前执行以下命令检查：
+**每次提交前必须执行以下命令检查：**
 ```bash
 git diff --cached  # 检查暂存区
-git diff          # 检查工作区
+git diff           # 检查工作区
 ```
+确保提交内容中不包含任何 token、apikey、secret、password 等敏感信息。
 
 ### 如果已提交敏感信息
 如发现已提交敏感信息，立即：

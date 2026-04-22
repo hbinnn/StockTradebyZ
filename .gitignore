@@ -43,3 +43,6 @@ pip-wheel-metadata/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local scripts with API keys
+run_with_keys.sh

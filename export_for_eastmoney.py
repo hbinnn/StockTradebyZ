@@ -196,7 +196,9 @@ def main():
     if args.output:
         output_path = args.output
     else:
-        output_path = _ROOT / "data" / f"eastmoney_{strategy_name}_{pick_date}.txt"
+        eastmoney_dir = _ROOT / "data" / "eastmoney"
+        eastmoney_dir.mkdir(parents=True, exist_ok=True)
+        output_path = eastmoney_dir / f"eastmoney_{strategy_name}_{pick_date}.txt"
         if args.format == "csv":
             output_path = output_path.with_suffix(".csv")
 
