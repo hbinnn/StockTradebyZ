@@ -110,17 +110,13 @@ class LocalReviewer(BaseReviewer):
             sys.exit(1)
 
     @staticmethod
-    def image_to_base64(path: Path, max_size=(800, 600), quality=80) -> str:
+    def image_to_base64(path: Path) -> str:
         """
-        将图片文件转为压缩后的 base64 字符串。
-        压缩图片以适应本地模型的上下文窗口限制。
+        将图片文件转为 base64 字符串。
+        使用原图以保留完整信息。
         """
-        img = Image.open(path)
-        img = img.convert("RGB")
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=quality, optimize=True)
-        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
 
     def _is_retryable_error(self, exc: Exception) -> bool:
         """判断是否为可重试的错误"""
