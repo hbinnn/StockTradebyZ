@@ -30,9 +30,11 @@ GEMINI_API_KEY=<你的gemini-key>            # Gemini（备选）
 
 ### 一键全流程
 ```bash
-python run_all.py                       # 使用 SiliconFlow Kimi-K2.6（默认）
+python run_all.py                       # 使用本地 LM Studio（默认）
 python run_all.py --skip-fetch          # 跳过数据下载
 python run_all.py --start-from 3        # 从第3步开始
+python run_all.py --reviewer local       # 使用本地 LM Studio（默认）
+python run_all.py --reviewer siliconflow # 使用 SiliconFlow Kimi-K2.6
 python run_all.py --reviewer zhipu      # 使用智谱 GLM-4.6V
 ```
 
@@ -49,11 +51,11 @@ python -m pipeline.cli preselect --config config/rules_preselect.yaml --data dat
 # 步骤3：导出候选K线图
 python dashboard/export_kline_charts.py
 
-# 步骤4：AI图表复评（SiliconFlow Kimi-K2.6 或 智谱GLM-4.6V）
-python agent/siliconflow_review.py                    # SiliconFlow Kimi-K2.6（默认）
-python agent/siliconflow_review.py --config config/siliconflow_review.yaml
-python agent/zhipu_review.py                         # 智谱 GLM-4.6V（备选）
-python agent/zhipu_review.py --config config/zhipu_review.yaml
+# 步骤4：AI图表复评（本地LM Studio、SiliconFlow Kimi-K2.6 或 智谱GLM-4.6V）
+python agent/local_review.py                         # 本地 LM Studio（默认）
+python agent/local_review.py --config config/local_review.yaml
+python agent/siliconflow_review.py                  # SiliconFlow Kimi-K2.6（备选）
+python agent/zhipu_review.py                        # 智谱 GLM-4.6V（备选）
 
 # 步骤5：评分叠加到K线图
 python dashboard/overlay_score_to_chart.py
@@ -107,7 +109,7 @@ pip install kaleido
 1. **pipeline/fetch_kline.py** - 从 Tushare 下载日线数据（前复权）到 `data/raw/*.csv`
 2. **pipeline/cli.py preselect** - 运行量化初选策略（B1: KDJ+知行均线，或砖型图）生成 `data/candidates/`
 3. **dashboard/export_kline_charts.py** - 将候选股票K线图导出到 `data/kline/{日期}/*.jpg`
-4. **agent/siliconflow_review.py** - SiliconFlow Kimi-K2.6 分析图表（默认），评分输出到 `data/review/{日期}/`
+4. **agent/local_review.py** - 本地 LM Studio 视觉大模型分析图表（默认），评分输出到 `data/review/{日期}/`
 5. **dashboard/overlay_score_to_chart.py** - 将评分结果叠加到K线图下方
 6. **similarity/patternMatcher.py** - 完美图形相似度匹配
 7. **dashboard/overlay_pattern_to_chart.py** - 将图形匹配标注叠加到K线图
@@ -131,9 +133,10 @@ pip install kaleido
   - `app.py` - Streamlit 看盘界面
 - **agent/** - LLM 复评基础架构
   - `base_reviewer.py` - BaseReviewer 基类（加载候选、查找图表、汇总结果）
-  - `siliconflow_review.py` - SiliconFlowReviewer 实现（Kimi-K2.6，默认）
+  - `local_review.py` - LocalReviewer 实现（本地 LM Studio，默认）
+  - `siliconflow_review.py` - SiliconFlowReviewer 实现（Kimi-K2.6）
   - `gemini_review.py` - GeminiReviewer 实现
-  - `zhipu_review.py` - ZhipuReviewer 实现（智谱GLM-4.6V，备选）
+  - `zhipu_review.py` - ZhipuReviewer 实现（智谱GLM-4.6V）
   - `prompt.md` - 交易分析提示词（含趋势/位置/量价/异动四个维度评分）
 - **root/**
   - `export_for_eastmoney.py` - 导出东方财富可导入的股票文件
@@ -141,6 +144,7 @@ pip install kaleido
 - **config/** - YAML 配置文件
   - `fetch_kline.yaml` - 数据抓取配置（日期范围、股票池、并发数）
   - `rules_preselect.yaml` - B1/Brick 策略参数
+  - `local_review.yaml` - 本地 LM Studio 模型、调用间隔、评分阈值
   - `siliconflow_review.yaml` - SiliconFlow Kimi-K2.6 模型、调用间隔、评分阈值
   - `gemini_review.yaml` - Gemini 模型、调用间隔、评分阈值
   - `zhipu_review.yaml` - 智谱GLM-4.6V模型、调用间隔、评分阈值
