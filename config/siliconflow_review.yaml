@@ -11,7 +11,7 @@ prompt_path: "agent/prompt.md"
 model: "Pro/moonshotai/Kimi-K2.6"
 
 # 请求间隔（秒），避免触发限流
-request_delay: 5
+request_delay: 8
 
 # 跳过已存在的评分文件（True=跳过，False=重新评分）
 skip_existing: false

@@ -23,6 +23,7 @@ import argparse
 import base64
 import os
 import sys
+import time
 import urllib.request
 import json as json_lib
 from pathlib import Path
@@ -31,6 +32,18 @@ from typing import Any, Dict, Union
 import yaml
 
 from base_reviewer import BaseReviewer
+
+# ────────────────────────────────────────────────
+# 错误模式定义
+# ────────────────────────────────────────────────
+CONNECTION_CLOSED_PATTERNS = (
+    "Remote end closed connection",
+    "Connection closed",
+    "Connection reset",
+    "Connection aborted",
+    "10054",  # WSAECONNRESET
+    "104",     # ECONNRESET (Linux)
+)
 
 # ────────────────────────────────────────────────
 # 配置加载
@@ -98,9 +111,15 @@ class SiliconFlowReviewer(BaseReviewer):
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
+    def _is_connection_closed_error(self, exc: Exception) -> bool:
+        """判断是否为连接关闭错误"""
+        msg = str(exc)
+        return any(pat in msg for pat in CONNECTION_CLOSED_PATTERNS)
+
     def review_stock(self, code: str, day_chart: Path, prompt: str) -> dict:
         """
         调用 SiliconFlow Kimi-K2.6 API，对单支股票进行图表分析，返回解析后的 JSON 结果。
+        支持连接关闭错误的自动重试。
         """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -142,6 +161,10 @@ class SiliconFlowReviewer(BaseReviewer):
             "temperature": 0.2,
         }
 
+        # 最大重试次数和超时时间
+        max_retries = 3
+        timeout = 220  # 220秒超时（测试显示平均120秒，最慢146秒）
+
         req = urllib.request.Request(
             self.API_URL,
             data=json_lib.dumps(payload).encode("utf-8"),
@@ -149,20 +172,42 @@ class SiliconFlowReviewer(BaseReviewer):
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            response_body = json_lib.loads(resp.read().decode("utf-8"))
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            start_time = time.time()
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    response_body = json_lib.loads(resp.read().decode("utf-8"))
 
-        # 提取响应文本
-        if "choices" not in response_body or not response_body["choices"]:
-            raise RuntimeError(f"SiliconFlow API 返回格式异常（code={code}）：{response_body}")
+                elapsed = time.time() - start_time
 
-        response_text = response_body["choices"][0]["message"]["content"]
-        if not response_text:
-            raise RuntimeError(f"SiliconFlow API 返回空响应，无法解析 JSON（code={code}）")
+                # 提取响应文本
+                if "choices" not in response_body or not response_body["choices"]:
+                    raise RuntimeError(f"SiliconFlow API 返回格式异常（code={code}）：{response_body}")
 
-        result = self.extract_json(response_text)
-        result["code"] = code  # 附加股票代码便于追溯
-        return result
+                response_text = response_body["choices"][0]["message"]["content"]
+                if not response_text:
+                    raise RuntimeError(f"SiliconFlow API 返回空响应，无法解析 JSON（code={code}）")
+
+                result = self.extract_json(response_text)
+                result["code"] = code  # 附加股票代码便于追溯
+                result["elapsed_seconds"] = round(elapsed, 2)  # 记录耗时
+                return result
+
+            except Exception as e:
+                elapsed = time.time() - start_time
+                if self._is_connection_closed_error(e):
+                    last_error = e
+                    if attempt < max_retries:
+                        wait_time = 5 * attempt  # 递增等待时间
+                        print(f"[WARN] {code} 连接被关闭，{wait_time}秒后重试 ({attempt}/{max_retries})...")
+                        time.sleep(wait_time)
+                    else:
+                        raise RuntimeError(f"{code} 重试{max_retries}次后仍失败：{e}") from e
+                else:
+                    raise
+
+        raise last_error  # 理论上不会走到这里
 
 
 def main():
