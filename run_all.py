@@ -6,7 +6,8 @@ run_all.py
   步骤 1  pipeline/fetch_kline.py              — 拉取最新 K 线数据
   步骤 2  pipeline/cli.py preselect            — 量化初选，生成候选列表
   步骤 3  dashboard/export_kline_charts.py     — 导出候选股 K 线图
-  步骤 4  agent/zhipu_review.py                — 智谱 GLM-4.6V 图表分析评分
+  步骤 4  agent/siliconflow_review.py          — SiliconFlow Kimi-K2.6 图表分析评分
+          (可选 agent/zhipu_review.py          — 智谱 GLM-4.6V 图表分析评分)
   步骤 5  dashboard/overlay_score_to_chart.py  — 将评分叠加到 K 线图
   步骤 6  similarity/patternMatcher.py         — 完美图形相似度匹配
   步骤 7  dashboard/overlay_pattern_to_chart.py — 将图形匹配标注叠加到 K 线图
@@ -16,6 +17,8 @@ run_all.py
     python run_all.py
     python run_all.py --skip-fetch     # 跳过行情下载（已有最新数据时）
     python run_all.py --start-from 3   # 从第 3 步开始（跳过前两步）
+    python run_all.py --reviewer siliconflow  # 使用 SiliconFlow Kimi-K2.6（默认）
+    python run_all.py --reviewer zhipu       # 使用智谱 GLM-4.6V
 """
 from __future__ import annotations
 
@@ -102,10 +105,16 @@ def main() -> None:
         "--start-from", type=int, default=1, metavar="N",
         help="从第 N 步开始执行（1~8），跳过前面的步骤",
     )
+    parser.add_argument(
+        "--reviewer",
+        choices=["siliconflow", "zhipu"],
+        default="siliconflow",
+        help="选择 AI 图表评审器：siliconflow=Kimi-K2.6（默认），zhipu=GLM-4.6V",
+    )
     args = parser.parse_args()
 
     start = args.start_from
-    
+
     if args.skip_fetch and start == 1:
         start = 2
 
@@ -130,12 +139,18 @@ def main() -> None:
             [PYTHON, str(ROOT / "dashboard" / "export_kline_charts.py")],
         )
 
-    # ── 步骤 4：智谱 GLM 图表分析 ──────────────────────────────────────
+    # ── 步骤 4：AI 图表分析 ───────────────────────────────────────────
     if start <= 4:
-        _run(
-            "4/8  智谱 GLM 图表分析（zhipu_review）",
-            [PYTHON, str(ROOT / "agent" / "zhipu_review.py")],
-        )
+        if args.reviewer == "siliconflow":
+            _run(
+                "4/8  SiliconFlow Kimi-K2.6 图表分析",
+                [PYTHON, str(ROOT / "agent" / "siliconflow_review.py")],
+            )
+        else:
+            _run(
+                "4/8  智谱 GLM-4.6V 图表分析",
+                [PYTHON, str(ROOT / "agent" / "zhipu_review.py")],
+            )
 
     # ── 步骤 5：评分叠加到 K 线图 ────────────────────────────────────
     if start <= 5:
