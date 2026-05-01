@@ -164,29 +164,29 @@ def main() -> None:
                 [PYTHON, str(ROOT / "agent" / "zhipu_review.py")],
             )
 
-    # ── 步骤 5：评分叠加到 K 线图 ────────────────────────────────────
-    if start <= 5:
+    # ── 步骤 5：评分叠加到 K 线图（依赖 AI 复评）──────────────────────
+    if start <= 5 and args.ai_review:
         _run(
             "5/8  评分叠加到 K 线图（overlay_score_to_chart）",
             [PYTHON, str(ROOT / "dashboard" / "overlay_score_to_chart.py")],
         )
 
-    # ── 步骤 6：完美图形相似度匹配 ───────────────────────────────────
-    if start <= 6:
+    # ── 步骤 6：完美图形相似度匹配（依赖 AI 复评）──────────────────────
+    if start <= 6 and args.ai_review:
         _run(
             "6/8  完美图形相似度匹配（patternMatcher）",
             [PYTHON, "-m", "similarity.patternMatcher"],
         )
 
-    # ── 步骤 7：图形匹配标注叠加 ──────────────────────────────────────
-    if start <= 7:
+    # ── 步骤 7：图形匹配标注叠加（依赖 AI 复评）─────────────────────────
+    if start <= 7 and args.ai_review:
         _run(
             "7/8  图形匹配标注叠加（overlay_pattern_to_chart）",
             [PYTHON, str(ROOT / "dashboard" / "overlay_pattern_to_chart.py")],
         )
 
-    # ── 步骤 8：导出东方财富文件 ──────────────────────────────────────
-    if start <= 8:
+    # ── 步骤 8：导出东方财富文件（依赖 AI 复评）────────────────────────
+    if start <= 8 and args.ai_review:
         _run(
             "8/8  导出东方财富文件（export_for_eastmoney）",
             [PYTHON, str(ROOT / "export_for_eastmoney.py")],
