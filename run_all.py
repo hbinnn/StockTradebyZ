@@ -18,9 +18,8 @@ run_all.py
     python run_all.py
     python run_all.py --skip-fetch     # 跳过行情下载（已有最新数据时）
     python run_all.py --start-from 3   # 从第 3 步开始（跳过前两步）
-    python run_all.py --reviewer local       # 使用本地 LM Studio（默认）
-    python run_all.py --reviewer siliconflow # 使用 SiliconFlow Kimi-K2.6
-    python run_all.py --reviewer zhipu       # 使用智谱 GLM-4.6V
+    python run_all.py --ai-review --reviewer local     # 启用本地 LM Studio AI 复评
+    python run_all.py --ai-review --reviewer siliconflow # 启用 SiliconFlow AI 复评
     python run_all.py --reviewer zhipu       # 使用智谱 GLM-4.6V
 """
 from __future__ import annotations
@@ -112,7 +111,12 @@ def main() -> None:
         "--reviewer",
         choices=["local", "siliconflow", "zhipu"],
         default="local",
-        help="选择 AI 图表评审器：local=本地LM Studio（默认），siliconflow=Kimi-K2.6，zhipu=GLM-4.6V",
+        help="选择 AI 图表评审器：local=本地LM Studio，siliconflow=Kimi-K2.6，zhipu=GLM-4.6V",
+    )
+    parser.add_argument(
+        "--ai-review",
+        action="store_true",
+        help="启用 AI 图表复评（默认关闭，需要时手动启用）",
     )
     args = parser.parse_args()
 
@@ -142,8 +146,8 @@ def main() -> None:
             [PYTHON, str(ROOT / "dashboard" / "export_kline_charts.py")],
         )
 
-    # ── 步骤 4：AI 图表分析 ───────────────────────────────────────────
-    if start <= 4:
+    # ── 步骤 4：AI 图表分析（默认关闭，需 --ai-review 启用）─────────
+    if start <= 4 and args.ai_review:
         if args.reviewer == "local":
             _run(
                 "4/8  本地 LM Studio 图表分析",
