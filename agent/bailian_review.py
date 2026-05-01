@@ -219,9 +219,20 @@ def main():
         default=str(_DEFAULT_CONFIG_PATH),
         help="配置文件路径（默认 config/bailian_review.yaml）",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="模型名称（如 kimi-k2.6、qwen3.6-plus 等）",
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
+
+    # 命令行指定的模型名称优先
+    if args.model:
+        config["model"] = args.model
+
     reviewer = BailianReviewer(config)
     reviewer.run()
 

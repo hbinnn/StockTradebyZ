@@ -118,6 +118,12 @@ def main() -> None:
         action="store_true",
         help="启用 AI 图表复评（默认关闭，需要时手动启用）",
     )
+    parser.add_argument(
+        "--bailian-model",
+        type=str,
+        default=None,
+        help="阿里云百炼使用的模型名称（如 kimi-k2.6、qwen3.6-plus 等）",
+    )
     args = parser.parse_args()
 
     start = args.start_from
@@ -159,9 +165,12 @@ def main() -> None:
                 [PYTHON, str(ROOT / "agent" / "siliconflow_review.py")],
             )
         elif args.reviewer == "bailian":
+            if not args.bailian_model:
+                print("[ERROR] 使用阿里云百炼时必须指定 --bailian-model 参数")
+                sys.exit(1)
             _run(
-                "4/8  阿里云百炼 Qwen-3.6-Plus 图表分析",
-                [PYTHON, str(ROOT / "agent" / "bailian_review.py")],
+                f"4/8  阿里云百炼 {args.bailian_model} 图表分析",
+                [PYTHON, str(ROOT / "agent" / "bailian_review.py"), "--model", args.bailian_model],
             )
         else:
             _run(
