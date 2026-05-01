@@ -185,12 +185,20 @@ def main() -> None:
             [PYTHON, str(ROOT / "dashboard" / "overlay_pattern_to_chart.py")],
         )
 
-    # ── 步骤 8：导出东方财富文件（依赖 AI 复评）────────────────────────
-    if start <= 8 and args.ai_review:
-        _run(
-            "8/8  导出东方财富文件（export_for_eastmoney）",
-            [PYTHON, str(ROOT / "export_for_eastmoney.py")],
-        )
+    # ── 步骤 8：导出东方财富文件 ──────────────────────────────────────
+    if start <= 8:
+        if args.ai_review:
+            # 有 AI 复评：基于评分结果导出
+            _run(
+                "8/8  导出东方财富文件（基于AI评分）",
+                [PYTHON, str(ROOT / "export_for_eastmoney.py")],
+            )
+        else:
+            # 无 AI 复评：直接从候选股票导出
+            _run(
+                "8/8  导出东方财富文件（基于候选股票）",
+                [PYTHON, str(ROOT / "export_for_eastmoney.py"), "--no-ai"],
+            )
 
     # ── 步骤 9：打印推荐结果 ─────────────────────────────────────────
     print(f"\n{'='*60}")

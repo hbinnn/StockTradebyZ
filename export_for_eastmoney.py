@@ -22,26 +22,34 @@ DEFAULT_SUGGESTION = _ROOT / "data" / "review"
 DEFAULT_CANDIDATES = _ROOT / "data" / "candidates" / "candidates_latest.json"
 
 
-def load_suggestion(review_dir: Path) -> tuple[list[dict], str, str]:
-    """加载复评结果，返回 (recommendations, pick_date, strategy_names)"""
-    # 查找最新的 review 目录
-    if review_dir.is_file():
-        suggestion_file = review_dir
-    else:
-        # 查找最新的日期目录
-        date_dirs = [d for d in review_dir.iterdir() if d.is_dir()]
-        if not date_dirs:
-            raise FileNotFoundError(f"找不到评审结果目录：{review_dir}")
-        latest_date = sorted(date_dirs, key=lambda x: x.name)[-1]
-        suggestion_file = latest_date / "suggestion.json"
+def load_candidates_directly(candidates_file: Path) -> tuple[list[dict], str, str]:
+    """直接加载候选股票文件，返回 (candidates, pick_date, strategy_names)"""
+    if not candidates_file.exists():
+        raise FileNotFoundError(f"找不到候选股票文件：{candidates_file}")
 
-    with open(suggestion_file, encoding="utf-8") as f:
+    with open(candidates_file, encoding="utf-8") as f:
         data = json.load(f)
 
-    # 默认策略名，后续从 candidates 加载
-    strategy_str = "B1"
+    pick_date = data.get("pick_date", "")
+    candidates = data.get("candidates", [])
 
-    return data.get("recommendations", []), suggestion_file.parent.name, strategy_str
+    strategies = set()
+    for cand in candidates:
+        strategy = cand.get("strategy", "B1")
+        strategies.add(strategy.upper() if isinstance(strategy, str) else "B1")
+    strategy_str = "_".join(sorted(strategies)) if strategies else "B1"
+
+    # 转换为统一格式
+    recommendations = []
+    for cand in candidates:
+        recommendations.append({
+            "code": cand.get("code", ""),
+            "strategy": cand.get("strategy", ""),
+            "close": cand.get("close", 0),
+            "total_score": 5.0,  # 默认满分，无AI评分时所有股票都导出
+        })
+
+    return recommendations, pick_date, strategy_str
 
 
 def load_strategies(candidates_file: Path) -> str:
@@ -181,12 +189,25 @@ def main():
         default=None,
         help="输出文件路径（默认自动生成）"
     )
+    parser.add_argument(
+        "--no-ai",
+        action="store_true",
+        help="无 AI 复评模式，直接从候选股票导出（不使用评分门槛）"
+    )
     args = parser.parse_args()
 
     # 加载数据
-    recommendations, pick_date, _ = load_suggestion(args.review_dir)
-    strategy_name = load_strategies(args.candidates)
     names = load_stock_names(args.candidates)
+
+    if args.no_ai:
+        # 无 AI 复评模式：直接从候选股票导出
+        recommendations, pick_date, strategy_name = load_candidates_directly(args.candidates)
+        print(f"[INFO] 模式：无 AI 复评，直接导出候选股票")
+    else:
+        # 有 AI 复评模式：从复评结果加载
+        recommendations, pick_date, _ = load_suggestion(args.review_dir)
+        strategy_name = load_strategies(args.candidates)
+        print(f"[INFO] 模式：基于 AI 复评结果")
 
     print(f"[INFO] 选股日期：{pick_date}")
     print(f"[INFO] 策略：{strategy_name}")
