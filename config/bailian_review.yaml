@@ -1,0 +1,21 @@
+# 阿里云百炼 Qwen-3.6-Plus 图表复评配置
+# 文档：https://help.aliyun.com/zh/model-studio/
+
+# 路径参数（相对路径基于项目根目录）
+candidates: "data/candidates/candidates_latest.json"
+kline_dir: "data/kline"
+output_dir: "data/review"
+prompt_path: "agent/prompt.md"
+
+# 阿里云百炼 API 配置
+api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+model: "qwen3.6-plus"
+
+# 请求间隔（秒），避免触发限流
+request_delay: 15
+
+# 跳过已存在的评分文件（True=跳过，False=重新评分）
+skip_existing: false
+
+# 推荐门槛（总分 >= 此值才进入推荐列表）
+suggest_min_score: 4.0

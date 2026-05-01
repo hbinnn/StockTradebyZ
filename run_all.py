@@ -109,9 +109,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--reviewer",
-        choices=["local", "siliconflow", "zhipu"],
+        choices=["local", "siliconflow", "zhipu", "bailian"],
         default="local",
-        help="选择 AI 图表评审器：local=本地LM Studio，siliconflow=Kimi-K2.6，zhipu=GLM-4.6V",
+        help="选择 AI 图表评审器：local=本地LM Studio，siliconflow=Kimi-K2.6，zhipu=GLM-4.6V，bailian=阿里云百炼",
     )
     parser.add_argument(
         "--ai-review",
@@ -157,6 +157,11 @@ def main() -> None:
             _run(
                 "4/8  SiliconFlow Kimi-K2.6 图表分析",
                 [PYTHON, str(ROOT / "agent" / "siliconflow_review.py")],
+            )
+        elif args.reviewer == "bailian":
+            _run(
+                "4/8  阿里云百炼 Qwen-3.6-Plus 图表分析",
+                [PYTHON, str(ROOT / "agent" / "bailian_review.py")],
             )
         else:
             _run(
