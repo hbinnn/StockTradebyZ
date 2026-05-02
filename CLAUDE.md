@@ -69,6 +69,9 @@ python dashboard/overlay_pattern_to_chart.py
 python pipeline/export_for_eastmoney.py
 python pipeline/export_for_eastmoney.py --min-score 4.5
 python pipeline/export_for_eastmoney.py --format csv
+
+# 步骤9：选股看板（全流程完成后自动启动）
+# → http://localhost:8501
 ```
 
 ## 目录结构

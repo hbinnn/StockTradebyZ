@@ -12,7 +12,8 @@ run_all.py
   步骤 5  dashboard/overlay_score_to_chart.py  — 将评分叠加到 K 线图
   步骤 6  similarity/patternMatcher.py         — 完美图形相似度匹配
   步骤 7  dashboard/overlay_pattern_to_chart.py — 将图形匹配标注叠加到 K 线图
-  步骤 8  export_for_eastmoney.py              — 导出东方财富可导入文件
+  步骤 8  pipeline/export_for_eastmoney.py     — 导出东方财富可导入文件
+  步骤 9  自动启动 Streamlit 看板               — http://localhost:8501
 
 用法：
     python run_all.py
@@ -225,6 +226,18 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("[步骤] 9/9  推荐购买的股票")
     _print_recommendations()
+
+    # ── 步骤 10：启动看板 ─────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print("[步骤] 启动选股看板 → http://localhost:8501")
+    print(f"{'='*60}")
+    import subprocess as _sp
+    _sp.Popen(
+        [PYTHON, "-m", "streamlit", "run", str(ROOT / "dashboard" / "app.py"),
+         "--server.headless", "true"],
+        cwd=str(ROOT),
+        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+    )
 
 
 if __name__ == "__main__":
