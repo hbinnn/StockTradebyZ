@@ -6,7 +6,7 @@
 global:
   data_dir: "./data/raw"          # A股日线CSV目录
   output_dir: "./data/candidates" # 候选结果输出目录
-  top_m: 50                      # 流动性池：取成交额最高的 top_m 只（测试用）
+  top_m: 5000                     # 流动性池：取成交额最高的 top_m 只（测试用）
   n_turnover_days: 43             # 滚动成交额窗口（日）
   min_bars_buffer: 10             # 额外的最小 bar 缓冲
 

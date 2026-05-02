@@ -3,6 +3,10 @@
 
 # 候选列表 JSON
 candidates: data/candidates/candidates_latest.json
+strategy_prompts:
+  b1: "strategies/b1/prompt.md"
+  brick: "strategies/brick/prompt.md"
+
 
 # 候选图表目录（其下按 pick_date 分目录）
 kline_dir: data/kline
@@ -11,8 +15,6 @@ kline_dir: data/kline
 output_dir: data/review
 
 # 提示词文件
-prompt_path: agent/prompt.md
-brick_prompt_path: agent/prompt_brick.md   # 砖型图策略专用 prompt
 
 # Gemini 模型名称
 model: gemini-3.1-pro-preview

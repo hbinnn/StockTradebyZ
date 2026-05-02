@@ -32,6 +32,7 @@ import base64
 import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from typing import Any, Dict, Union
 
 import yaml
@@ -41,15 +42,15 @@ from base_reviewer import BaseReviewer
 # ────────────────────────────────────────────────
 # 配置加载
 # ────────────────────────────────────────────────
-_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_CONFIG_PATH = _ROOT / "config" / "zhipu_review.yaml"
+_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_CONFIG_PATH = _ROOT / "agent" / "zhipu" / "config.yaml"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     # 路径参数（相对路径默认基于项目根目录）
     "candidates": "data/candidates/candidates_latest.json",
     "kline_dir": "data/kline",
     "output_dir": "data/review",
-    "prompt_path": "agent/prompt.md",
+    "strategy_prompts": {"b1": "strategies/b1/prompt.md", "brick": "strategies/brick/prompt.md"},
     # 智谱模型参数
     "model": "glm-4v",
     "request_delay": 5,
@@ -77,7 +78,7 @@ def load_config(config_path: Union[Path, None] = None) -> Dict[str, Any]:
     cfg["candidates"] = _resolve_cfg_path(cfg["candidates"])
     cfg["kline_dir"] = _resolve_cfg_path(cfg["kline_dir"])
     cfg["output_dir"] = _resolve_cfg_path(cfg["output_dir"])
-    cfg["prompt_path"] = _resolve_cfg_path(cfg["prompt_path"])
+    for s in cfg.get("strategy_prompts", {}): cfg["strategy_prompts"][s] = str(_resolve_cfg_path(cfg["strategy_prompts"][s]))
 
     return cfg
 

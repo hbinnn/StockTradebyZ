@@ -16,16 +16,16 @@ class Candidate:
     strategy: str                      # 来源策略，如 "b1" / "brick"
     close: float                       # 选股日收盘价
     turnover_n: float                  # 滚动成交额（流动性代理）
-    brick_growth: Optional[float] = None   # 砖型图增长倍数（仅 brick 策略有效）
-    extra: Dict[str, Any] = field(default_factory=dict)  # 可扩展字段
+    extra: Dict[str, Any] = field(default_factory=dict)  # 策略自定义字段（如 brick_growth）
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
-        # 清理 None / 空 extra
         if not d["extra"]:
             d.pop("extra")
-        if d["brick_growth"] is None:
-            d.pop("brick_growth")
+        # 展平 extra 到顶层（向后兼容）
+        for k, v in d.get("extra", {}).items():
+            if v is not None:
+                d[k] = v
         return d
 
 

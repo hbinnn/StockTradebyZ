@@ -14,14 +14,15 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import yaml 
 
 from schemas import Candidate
-from Selector import B1Selector, BrickChartSelector
+from strategies.b1.selector import B1Selector
+from strategies.brick.selector import BrickChartSelector
 from pipeline_core import MarketDataPreparer, TopTurnoverPoolBuilder
 
 logger = logging.getLogger(__name__)
@@ -134,27 +135,43 @@ def _resolve_pick_date(
 def _calc_warmup(cfg: dict, buffer: int) -> int:
     """根据启用策略的参数计算最长所需 warmup bars."""
     warmup = 120
-
-    cfg_b1 = cfg.get("b1", {})
-    if cfg_b1.get("enabled", True):
-        warmup = max(warmup, int(cfg_b1.get("zx_m4", 371)) + buffer)
-
-    cfg_brick = cfg.get("brick", {})
-    if cfg_brick.get("enabled", True):
-        warmup = max(
-            warmup,
-            int(cfg_brick.get("wma_long", 120)) * 5 + buffer,
-            int(cfg_brick.get("zxdkx_m4", 114)) + buffer,
-        )
-
+    for name in _STRATEGY_RUNNERS:
+        sc = cfg.get(name, {})
+        if not sc.get("enabled", True):
+            continue
+        warmup = max(warmup, _STRATEGY_WARMUP_FN.get(name, lambda _1, _2: 120)(sc, buffer))
     return warmup
+
+
+# =============================================================================
+# 策略注册表
+# =============================================================================
+
+# 新增策略只需在此注册: {name: runner_fn, ...}
+_STRATEGY_RUNNERS: dict[str, Any] = {}
+_STRATEGY_WARMUP_FN: dict[str, Any] = {}
+
+
+def _register(name: str, warmup_fn=None):
+    """装饰器：将策略 runner 注册到 _STRATEGY_RUNNERS。"""
+    def deco(fn):
+        _STRATEGY_RUNNERS[name] = fn
+        if warmup_fn:
+            _STRATEGY_WARMUP_FN[name] = warmup_fn
+        return fn
+    return deco
 
 
 # =============================================================================
 # B1 策略
 # =============================================================================
 
-def run_b1(
+def _b1_warmup(cfg: dict, buffer: int) -> int:
+    return max(int(cfg.get("zx_m4", 371)) + buffer, 120)
+
+
+@_register("b1", warmup_fn=_b1_warmup)
+def _run_b1(
     prepared: Dict[str, pd.DataFrame],
     pick_date: pd.Timestamp,
     pool_codes: List[str],
@@ -203,7 +220,16 @@ def run_b1(
 # 砖型图策略
 # =============================================================================
 
-def run_brick(
+def _brick_warmup(cfg: dict, buffer: int) -> int:
+    return max(
+        int(cfg.get("wma_long", 120)) * 5 + buffer,
+        int(cfg.get("zxdkx_m4", 114)) + buffer,
+        120,
+    )
+
+
+@_register("brick", warmup_fn=_brick_warmup)
+def _run_brick(
     prepared: Dict[str, pd.DataFrame],
     pick_date: pd.Timestamp,
     pool_codes: List[str],
@@ -260,12 +286,12 @@ def run_brick(
                     strategy="brick",
                     close=float(row["close"]),
                     turnover_n=float(row["turnover_n"]),
-                    brick_growth=bg if np.isfinite(bg) else None,
+                    extra={"brick_growth": bg} if np.isfinite(bg) else {},
                 ))
         except Exception as exc:
             logger.debug("Brick skip %s: %s", code, exc)
 
-    candidates.sort(key=lambda c: c.brick_growth or -999, reverse=True)
+    candidates.sort(key=lambda c: c.extra.get("brick_growth") or -999, reverse=True)
     logger.info("Brick 选出: %d 只", len(candidates))
     return candidates
 
@@ -333,16 +359,16 @@ def run_preselect(
     enabled_strategies = [s for s in (strategies or [])]
     run_all = enabled_strategies == []
 
-    # 6) 运行各策略
+    # 6) 遍历注册表运行各策略
     all_candidates: List[Candidate] = []
-
-    if run_all or "b1" in enabled_strategies:
-        if cfg.get("b1", {}).get("enabled", True):
-            all_candidates.extend(run_b1(prepared, pick_ts, pool_codes, cfg["b1"]))
-
-    if run_all or "brick" in enabled_strategies:
-        if cfg.get("brick", {}).get("enabled", True):
-            all_candidates.extend(run_brick(prepared, pick_ts, pool_codes, cfg["brick"]))
+    for name, runner in _STRATEGY_RUNNERS.items():
+        if not (run_all or name in enabled_strategies):
+            continue
+        sc = cfg.get(name, {})
+        if not sc.get("enabled", True):
+            continue
+        logger.info("运行策略: %s", name)
+        all_candidates.extend(runner(prepared, pick_ts, pool_codes, sc))
 
     # 7) 允许同一股票命中多个策略，下游各策略独立评审
     logger.info("初选完成，候选股票: %d 只次（含跨策略重复）", len(all_candidates))

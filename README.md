@@ -3,21 +3,19 @@
 一个面向 A 股的半自动选股项目：
 
 - 使用 Tushare 拉取股票日线数据
-- 用量化规则做初选（B1策略）
-- 导出候选股票 K 线图
-- 调用智谱 GLM-4.6V 对图表进行 AI 复评打分
-- 将评分结果叠加到K线图上
-
----
+- 用量化规则做初选（B1 策略 + 砖型图策略）
+- 导出候选股票 K 线图（砖型图候选含砖型图红绿柱子图）
+- 调用 LLM（百炼/智谱/SiliconFlow/Gemini/LM Studio）对图表进行 AI 复评打分
+- 多策略可并行初选、独立评审，互不干扰
 
 ## 更新说明
 
-- 推翻旧版选股模式
-- 新加入AI看图打分精选功能
-- 支持智谱GLM-4.6V和Gemini两种AI模型
-- 新增评分叠加功能，直接在K线图上显示评分
-
----
+- 重构目录结构：策略代码与 prompt 按策略独立目录存放（`strategies/{name}/`）
+- 新增砖型图策略（通达信原版公式），含专用 AI 复评 prompt
+- 新增阿里云百炼评审器
+- 新增 `--strategies` CLI 参数支持按策略筛选
+- 支持多策略并行初选，同一股票可命中多个策略分别评审
+- 评审器配置文件与代码同目录存放
 
 ## 1. 项目流程
 
@@ -26,178 +24,105 @@
 1. 下载 K 线数据（pipeline.fetch_kline）
 2. 量化初选（pipeline.cli preselect）
 3. 导出候选图表（dashboard/export_kline_charts.py）
-4. AI 图表复评（agent/zhipu_review.py 或 agent/gemini_review.py）
+4. AI 图表复评（agent/{platform}/review.py）
 5. 叠加评分到K线图（dashboard/overlay_score_to_chart.py）
-6. 打印推荐结果（读取 suggestion.json）
-
-输出主链路：
-
-- data/raw：原始日线 CSV
-- data/candidates：初选候选列表
-- data/kline/日期：候选图表（含评分叠加）
-- data/review/日期：AI 单股评分与汇总建议
-
----
+6. 完美图形相似度匹配（similarity.patternMatcher）
+7. 图形匹配标注叠加（dashboard/overlay_pattern_to_chart.py）
+8. 导出东方财富文件（pipeline/export_for_eastmoney.py）
 
 ## 2. 目录说明
 
-- [pipeline](pipeline)：数据抓取与量化初选
-- [dashboard](dashboard)：看盘界面与图表导出
-- [agent](agent)：LLM 评审逻辑
-- [config](config)：抓取、初选、AI复评配置
-- [data](data)：运行数据与结果
-- [run_all.py](run_all.py)：全流程一键入口
-
----
+```
+pipeline/       核心管线（Selector 基类、数据抓取、初选、导出）
+strategies/     策略目录（b1/、brick/，每个含 selector.py + prompt.md）
+agent/          LLM 评审器（base_reviewer.py + local/siliconflow/zhipu/gemini/bailian）
+dashboard/      看盘界面与图表导出
+config/         全局配置（非 reviewer 专属）
+data/           运行数据与结果
+```
 
 ## 3. 快速开始
 
 ### 3.1 克隆项目
 
-~~~bash
+```bash
 git clone https://github.com/SebastienZh/StockTradebyZ
 cd StockTradebyZ
-~~~
+```
 
 ### 3.2 安装依赖
 
-~~~bash
+```bash
 pip install -r requirements.txt
-~~~
+```
 
 ### 3.3 设置环境变量
 
-Windows PowerShell：
+```bash
+export TUSHARE_TOKEN="你的TushareToken"
+export BAILIAN_API_KEY="你的百炼Key"   # 按需
+```
 
-~~~powershell
-[Environment]::SetEnvironmentVariable("TUSHARE_TOKEN", "你的TushareToken", "User")
-[Environment]::SetEnvironmentVariable("ZHIPU_API_KEY", "你的智谱ApiKey", "User")
-~~~
+### 3.4 运行
 
-写入后重开终端，环境变量才会在新会话中生效。
+```bash
+# 全流程（需先启用 AI 复评）
+python run_all.py --ai-review --reviewer bailian --bailian-model kimi-k2.6
 
-### 3.4 运行一键脚本
+# 仅砖型图策略
+python run_all.py --strategies brick --ai-review --reviewer bailian --bailian-model kimi-k2.6
 
-~~~bash
-python run_all.py
-~~~
-
-常用参数：
-
-~~~bash
+# 跳过数据下载
 python run_all.py --skip-fetch
-python run_all.py --start-from 3
-~~~
+```
 
-参数说明：
+## 4. 分步运行
 
-- --skip-fetch：跳过数据下载，直接进入初选
-- --start-from N：从第 N 步开始执行
-
----
-
-## 4. 分步运行攻略
-
-### 步骤 1：拉取 K 线
-
-~~~bash
+```bash
+# 步骤1：拉取K线
 python -m pipeline.fetch_kline
-~~~
 
-### 步骤 2：量化初选
-
-~~~bash
+# 步骤2：量化初选（--strategies 可选：b1, brick, b1,brick）
 python -m pipeline.cli preselect
-python -m pipeline.cli preselect --date 2026-04-17
-~~~
+python -m pipeline.cli preselect --strategies brick
 
-### 步骤 3：导出候选图表
-
-~~~bash
+# 步骤3：导出K线图
 python dashboard/export_kline_charts.py
-~~~
 
-### 步骤 4：AI 图表复评（智谱）
+# 步骤4：AI复评
+python agent/bailian/review.py --model kimi-k2.6
 
-~~~bash
-export ZHIPU_API_KEY='你的智谱key' && python agent/zhipu_review.py
-~~~
+# 步骤8：导出东方财富
+python pipeline/export_for_eastmoney.py
+```
 
-或使用Gemini：
+## 5. 选股策略
 
-~~~bash
-export GEMINI_API_KEY='你的gemini-key' && python agent/gemini_review.py
-~~~
+### B1 策略（KDJ + 知行均线）
 
-### 步骤 5：叠加评分到K线图
+4 个 Filter：KDJ 分位过滤 + 知行线条件 + 周线多头排列 + 最大量非阴线
 
-~~~bash
-python dashboard/overlay_score_to_chart.py
-~~~
+### 砖型图策略（通达信原版公式）
 
----
+5 个 Filter：砖型图形态（红绿柱 + 增长倍数）+ 知行线位置 + 知行多空条件 + 周线多头排列 + CloseAboveZXDQ
 
-## 5. B1 选股策略
-
-B1策略是基于KDJ指标和知行均线的波段选股策略，包含4个Filter：
-
-1. **KDJ分位过滤**：J值 < 15 或处于10%历史分位
-2. **知行均线条件**：收盘价 > 知行短线 且 知行多空 > 知行短线
-3. **周线均线多头**：周线 MA5 > MA10 > MA20
-4. **最大量日非阴线**：近20日最大量那天不是阴线
-
-详见 [DOCUMENTATION.md](DOCUMENTATION.md) 第五章。
-
----
+详见 `strategies/b1/prompt.md` 和 `strategies/brick/prompt.md`。
 
 ## 6. AI 评分说明
 
-AI复评从4个维度分析股票：
-
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| trend_structure | 0.20 | 均线多头排列健康度 |
-| price_position | 0.20 | 相对历史高点的位置 |
-| volume_behavior | 0.30 | 上涨放量、回调缩量健康度 |
-| previous_abnormal_move | 0.30 | 主力建仓痕迹 |
-
-总分范围 1.0~5.0，计算公式：
-```
-total_score = trend_structure×0.20 + price_position×0.20 + volume_behavior×0.30 + previous_abnormal_move×0.30
-```
-
-判定规则：PASS(≥4.0) / WATCH(3.2~4.0) / REJECT(<3.2)
-
----
+每个策略有独立的 prompt 和评分维度，评审输出为 `{code}_{strategy}.json`。同一股票命中多个策略时分别评审、互不覆盖。
 
 ## 7. 常见问题
 
 ### Q1：fetch_kline 报 token 错误
-
-检查 TUSHARE_TOKEN 是否已设置，确认 token 有效且账号权限正常。
+检查 TUSHARE_TOKEN 是否已设置。
 
 ### Q2：导出图表时报 write_image 错误
-
-确认已安装 kaleido：`pip install -U kaleido`
+`pip install -U kaleido`
 
 ### Q3：AI复评失败
-
-- 检查 API_KEY 是否设置
-- 网络连接是否正常
-- 可尝试增加 request_delay 间隔
-
-### Q4：评分总分超过5分
-
-这是GLM返回的简单相加值而非加权值，已修改 prompt.md 使用加权计算公式，重新运行复评即可。
-
----
+检查对应平台 API_KEY，确认网络连接，可增加 request_delay。
 
 ## License
 
-本项目采用 CC BY-NC 4.0 协议发布。
-
-- 允许：学习、研究、非商业用途的使用与分发
-- 禁止：任何形式的商业使用、出售或以盈利为目的的部署
-- 要求：转载或引用须注明原作者与来源
-
-Copyright © 2026 SebastienZh. All rights reserved.
+CC BY-NC 4.0 — 学习研究可自由使用，禁止商业用途。

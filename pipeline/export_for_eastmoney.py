@@ -8,16 +8,16 @@ export_for_eastmoney.py
     2. CSV 带名称格式 - 股票代码,股票名称
 
 用法：
-    python export_for_eastmoney.py
-    python export_for_eastmoney.py --format csv_with_name
-    python export_for_eastmoney.py --min-score 4.5
+    python pipeline/export_for_eastmoney.py
+    python pipeline/export_for_eastmoney.py --format csv
+    python pipeline/export_for_eastmoney.py --min-score 4.5
 """
 import argparse
 import csv
 import json
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent
+_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUGGESTION = _ROOT / "data" / "review"
 DEFAULT_CANDIDATES = _ROOT / "data" / "candidates" / "candidates_latest.json"
 

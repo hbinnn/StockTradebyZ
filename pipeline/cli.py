@@ -104,7 +104,8 @@ def cmd_preselect(args: argparse.Namespace) -> None:
         print(f"\n{'代码':>8}  {'策略':>6}  {'收盘价':>8}  {'砖型增长':>10}")
         print("-" * 44)
         for c in candidates:
-            bg = f"{c.brick_growth:.2f}x" if c.brick_growth is not None else "  —"
+            bg_val = c.extra.get("brick_growth")
+            bg = f"{bg_val:.2f}x" if bg_val is not None else "  —"
             print(f"{c.code:>8}  {c.strategy:>6}  {c.close:>8.2f}  {bg:>10}")
     else:
         print("\n(今日无候选股票)")

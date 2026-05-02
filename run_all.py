@@ -6,9 +6,9 @@ run_all.py
   步骤 1  pipeline/fetch_kline.py              — 拉取最新 K 线数据
   步骤 2  pipeline/cli.py preselect            — 量化初选，生成候选列表
   步骤 3  dashboard/export_kline_charts.py     — 导出候选股 K 线图
-  步骤 4  agent/local_review.py                — 本地 LM Studio 大模型图表分析评分
-          (可选 agent/siliconflow_review.py    — SiliconFlow Kimi-K2.6 图表分析评分)
-          (可选 agent/zhipu_review.py          — 智谱 GLM-4.6V 图表分析评分)
+  步骤 4  agent/local/review.py                — 本地 LM Studio 大模型图表分析评分
+          (可选 agent/siliconflow/review.py    — SiliconFlow Kimi-K2.6 图表分析评分)
+          (可选 agent/zhipu/review.py          — 智谱 GLM-4.6V 图表分析评分)
   步骤 5  dashboard/overlay_score_to_chart.py  — 将评分叠加到 K 线图
   步骤 6  similarity/patternMatcher.py         — 完美图形相似度匹配
   步骤 7  dashboard/overlay_pattern_to_chart.py — 将图形匹配标注叠加到 K 线图
@@ -164,12 +164,12 @@ def main() -> None:
         if args.reviewer == "local":
             _run(
                 "4/8  本地 LM Studio 图表分析",
-                [PYTHON, str(ROOT / "agent" / "local_review.py")],
+                [PYTHON, str(ROOT / "agent" / "local" / "review.py")],
             )
         elif args.reviewer == "siliconflow":
             _run(
                 "4/8  SiliconFlow Kimi-K2.6 图表分析",
-                [PYTHON, str(ROOT / "agent" / "siliconflow_review.py")],
+                [PYTHON, str(ROOT / "agent" / "siliconflow" / "review.py")],
             )
         elif args.reviewer == "bailian":
             if not args.bailian_model:
@@ -177,12 +177,12 @@ def main() -> None:
                 sys.exit(1)
             _run(
                 f"4/8  阿里云百炼 {args.bailian_model} 图表分析",
-                [PYTHON, str(ROOT / "agent" / "bailian_review.py"), "--model", args.bailian_model],
+                [PYTHON, str(ROOT / "agent" / "bailian" / "review.py"), "--model", args.bailian_model],
             )
         else:
             _run(
                 "4/8  智谱 GLM-4.6V 图表分析",
-                [PYTHON, str(ROOT / "agent" / "zhipu_review.py")],
+                [PYTHON, str(ROOT / "agent" / "zhipu" / "review.py")],
             )
 
     # ── 步骤 5：评分叠加到 K 线图（依赖 AI 复评）──────────────────────
@@ -212,13 +212,13 @@ def main() -> None:
             # 有 AI 复评：基于评分结果导出
             _run(
                 "8/8  导出东方财富文件（基于AI评分）",
-                [PYTHON, str(ROOT / "export_for_eastmoney.py")],
+                [PYTHON, str(ROOT / "pipeline" / "export_for_eastmoney.py")],
             )
         else:
             # 无 AI 复评：直接从候选股票导出
             _run(
                 "8/8  导出东方财富文件（基于候选股票）",
-                [PYTHON, str(ROOT / "export_for_eastmoney.py"), "--no-ai"],
+                [PYTHON, str(ROOT / "pipeline" / "export_for_eastmoney.py"), "--no-ai"],
             )
 
     # ── 步骤 9：打印推荐结果 ─────────────────────────────────────────

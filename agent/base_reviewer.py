@@ -19,12 +19,12 @@ from typing import Any, Dict, List, Optional
 class BaseReviewer:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.prompt = self.load_prompt(Path(config["prompt_path"]))
-        # 砖型图策略可选专用 prompt
-        brick_prompt_path = config.get("brick_prompt_path")
-        self.prompt_brick = self.load_prompt(Path(brick_prompt_path)) if brick_prompt_path else self.prompt
         self.kline_dir = Path(config["kline_dir"])
         self.output_dir = Path(config["output_dir"])
+        # 策略→prompt 映射表：每个策略必须显式配置，缺失则跳过
+        self.strategy_prompts: dict[str, str] = {}
+        for strategy, path in config.get("strategy_prompts", {}).items():
+            self.strategy_prompts[strategy] = self.load_prompt(Path(path))
 
     @staticmethod
     def load_prompt(prompt_path: Path) -> str:
@@ -114,8 +114,12 @@ class BaseReviewer:
                 failed_codes.append(code)
                 continue
 
-            # 根据策略选择对应的 prompt
-            prompt = self.prompt_brick if strategy == "brick" else self.prompt
+            # 检查策略是否有对应 prompt，缺失则报错跳过
+            prompt = self.strategy_prompts.get(strategy)
+            if prompt is None:
+                print(f"[{i}/{len(candidates)}] {code} ({strategy}) — 未配置 prompt，跳过。")
+                failed_codes.append(code)
+                continue
             print(f"[{i}/{len(candidates)}] {code} ({strategy}) — 正在分析 ...", end=" ", flush=True)
 
             try:

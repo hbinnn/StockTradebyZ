@@ -43,24 +43,29 @@ def _load_candidates(candidates_path: Path) -> tuple[list[dict], str]:
         data = json.load(f)
     candidates: list[dict] = data.get("candidates", [])
     pick_date = data.get("pick_date", "")
-    brick_count = sum(1 for c in candidates if c.get("strategy") == "brick")
-    print(f"[INFO] 候选股票数量：{len(candidates)}（砖型图 {brick_count} 只） pick_date：{pick_date or '(未设置)'}  来源：{candidates_path.name}")
+    strategy_counts = {}
+    for c in candidates:
+        s = c.get("strategy", "?")
+        strategy_counts[s] = strategy_counts.get(s, 0) + 1
+    count_str = "  ".join(f"{k}:{v}" for k, v in sorted(strategy_counts.items()))
+    print(f"[INFO] 候选股票数量：{len(candidates)}（{count_str}） pick_date：{pick_date or '(未设置)'}  来源：{candidates_path.name}")
     return candidates, pick_date
 
 
 def _dedup_candidates(candidates: list[dict]) -> list[dict]:
-    """按 code 去重，若任一策略是 brick 则标记为砖型图图表。"""
+    """按 code 去重，合并各策略的图表特性标记。"""
     seen: dict[str, dict] = {}
     for c in candidates:
         code = c["code"]
+        s = c.get("strategy", "")
         if code in seen:
-            # 合并策略标记：已有或新来的是 brick 则标记
-            if c.get("strategy") == "brick":
-                seen[code]["_is_brick"] = True
-                seen[code]["strategies"] = seen[code].get("strategies", []) + [c.get("strategy")]
+            seen[code]["strategies"] = seen[code].get("strategies", []) + [s]
+            # 合并图表特性
+            for feat_key in _STRATEGY_CHART_FEATURES.get(s, {}):
+                seen[code].setdefault(feat_key, _STRATEGY_CHART_FEATURES[s][feat_key])
         else:
-            c["_is_brick"] = c.get("strategy") == "brick"
-            c["strategies"] = [c.get("strategy", "")]
+            c["strategies"] = [s]
+            c.update(_STRATEGY_CHART_FEATURES.get(s, {}))
             seen[code] = c
     return list(seen.values())
 
@@ -109,6 +114,14 @@ CONFIG = {
 # 砖型图计算参数（与 rules_preselect.yaml 保持一致）
 BRICK_PARAMS = {"n": 4, "m1": 4, "m2": 6, "m3": 6, "t": 4.0, "shift1": 90.0, "shift2": 100.0, "sma_w1": 1, "sma_w2": 1, "sma_w3": 1}
 
+# 策略→图表特性映射（新增策略只需在此注册）
+_STRATEGY_CHART_FEATURES: dict[str, dict] = {
+    "brick": {"show_brick": True, "height_extra": 140, "label": "砖型图"},
+}
+
+# 运行时计算：哪些策略需要砖型图
+_BRICK_STRATEGIES = {s for s, f in _STRATEGY_CHART_FEATURES.items() if f.get("show_brick")}
+
 
 def main() -> None:
     candidates_path = Path(CONFIG["candidates"])
@@ -133,7 +146,8 @@ def main() -> None:
     for c in codes_dedup:
         code: str = c["code"]
         strategies: list = c.get("strategies", [])
-        is_brick = c.get("_is_brick", False)
+        show_brick = c.get("show_brick", False)
+        height_extra = c.get("height_extra", 0)
         df_raw = _load_raw(code, raw_dir)
         if df_raw.empty:
             print(f"[SKIP] {code}  — 无日线数据")
@@ -143,13 +157,13 @@ def main() -> None:
         # ── 日线图 ────────────────────────────────────────────────────
         day_path = out_root / f"{code}_day.jpg"
         try:
-            chart_height = CONFIG["day_height"] + 140 if is_brick else CONFIG["day_height"]
+            chart_height = CONFIG["day_height"] + height_extra
             strategy_label = "+".join(strategies) if strategies else ""
             fig_day = make_daily_chart(
                 df_raw, code,
                 bars=CONFIG["bars"],
                 height=chart_height,
-                show_brick=is_brick,
+                show_brick=show_brick,
                 brick_params=BRICK_PARAMS,
                 strategy=strategy_label,
             )
