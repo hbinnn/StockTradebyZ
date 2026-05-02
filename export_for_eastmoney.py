@@ -22,6 +22,32 @@ DEFAULT_SUGGESTION = _ROOT / "data" / "review"
 DEFAULT_CANDIDATES = _ROOT / "data" / "candidates" / "candidates_latest.json"
 
 
+def load_suggestion(review_dir: Path) -> tuple[list[dict], str, str]:
+    """从 AI 复评结果目录加载 suggestion.json，返回 (recommendations, pick_date, strategy_str)"""
+    review_dir = Path(review_dir)
+    # 查找最新的 suggestion.json
+    suggestion_files = sorted(review_dir.glob("*/suggestion.json"))
+    if not suggestion_files:
+        raise FileNotFoundError(f"在 {review_dir} 下找不到 suggestion.json")
+
+    latest = suggestion_files[-1]
+    with open(latest, encoding="utf-8") as f:
+        data = json.load(f)
+
+    pick_date = data.get("date", "")
+    recommendations = []
+    for r in data.get("recommendations", []):
+        recommendations.append({
+            "code": r.get("code", ""),
+            "total_score": r.get("total_score", 0),
+            "verdict": r.get("verdict", ""),
+            "signal_type": r.get("signal_type", ""),
+            "comment": r.get("comment", ""),
+        })
+
+    return recommendations, pick_date, ""
+
+
 def load_candidates_directly(candidates_file: Path) -> tuple[list[dict], str, str]:
     """直接加载候选股票文件，返回 (candidates, pick_date, strategy_names)"""
     if not candidates_file.exists():
