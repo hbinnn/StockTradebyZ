@@ -6,6 +6,7 @@ candidates: "data/candidates/candidates_latest.json"
 strategy_prompts:
   b1: "strategies/b1/prompt.md"
   brick: "strategies/brick/prompt.md"
+  b2: "strategies/b2/prompt.md"
 
 kline_dir: "data/kline"
 output_dir: "data/review"

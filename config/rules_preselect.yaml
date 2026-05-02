@@ -55,3 +55,27 @@ brick:
   wma_short: 5
   wma_mid: 10
   wma_long: 20
+
+# ── B2 策略参数（B1 衍生：昨日B1通过 + 今日涨幅放量突破） ──────────────
+b2:
+  enabled: true
+
+  # B2 专属参数
+  daily_gain_threshold: 0.0385   # 当日涨幅门槛（3.85%）
+  j_max: 80.0                     # KDJ J 值上限
+
+  # B1 参数（透传给内部 B1Selector）
+  j_threshold: 20.0
+  j_q_threshold: 0.10
+  kdj_n: 9
+  zx_m1: 14
+  zx_m2: 28
+  zx_m3: 57
+  zx_m4: 114
+  zxdq_span: 10
+  require_close_gt_long: true
+  require_short_gt_long: true
+  wma_short: 5
+  wma_mid: 10
+  wma_long: 20
+  max_vol_lookback: 20
