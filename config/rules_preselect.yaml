@@ -6,7 +6,7 @@
 global:
   data_dir: "./data/raw"          # A股日线CSV目录
   output_dir: "./data/candidates" # 候选结果输出目录
-  top_m: 5000                     # 流动性池：取成交额最高的 top_m 只
+  top_m: 50                      # 流动性池：取成交额最高的 top_m 只（测试用）
   n_turnover_days: 43             # 滚动成交额窗口（日）
   min_bars_buffer: 10             # 额外的最小 bar 缓冲
 
@@ -17,34 +17,34 @@ b1:
   zx_m2: 28
   zx_m3: 57
   zx_m4: 114
-  j_threshold: 15.0
+  j_threshold: 20.0
   j_q_threshold: 0.10
 
 # ── 砖型图（BrickChart）策略参数 ──────────────────────────────────────
 brick:
-  enabled: false
+  enabled: true
 
-  # 砖型图计算参数
-  n: 8
-  m1: 3
-  m2: 12
-  m3: 12
-  t: 8
-  shift1: 92
-  shift2: 114
+  # 砖型图计算参数（通达信原版）
+  n: 4
+  m1: 4
+  m2: 6
+  m3: 6
+  t: 4
+  shift1: 90
+  shift2: 100
   sma_w1: 1
   sma_w2: 1
   sma_w3: 1
 
   # 选股过滤阈值
-  daily_return_threshold: 0.2    # 今日涨幅上限
   brick_growth_ratio: 0.5         # 今日红柱 >= N × 昨日绿柱绝对值
-  min_prior_green_bars: 1         # 红柱前至少有几根连续绿柱
 
   # 知行线参数
-  zxdq_ratio: 1.47                 # 收盘价 < zxdq × ratio；null = 不启用
+  zxdq_ratio: null                 # 收盘价 < zxdq × ratio；null = 不启用
   zxdq_span: 10
   require_zxdq_gt_zxdkx: true
+  require_close_gt_zxdq: true      # 收盘价 >= zxdq × zxdq_close_ratio
+  zxdq_close_ratio: 0.98           # 容忍 2% 浮动
   zxdkx_m1: 14
   zxdkx_m2: 28
   zxdkx_m3: 57

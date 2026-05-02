@@ -216,12 +216,12 @@ def run_brick(
     避免重复计算。
     """
     selector = BrickChartSelector(
-        daily_return_threshold=float(cfg_brick.get("daily_return_threshold", 0.05)),
-        brick_growth_ratio=float(cfg_brick.get("brick_growth_ratio", 1.0)),
-        min_prior_green_bars=int(cfg_brick.get("min_prior_green_bars", 2)),
+        brick_growth_ratio=float(cfg_brick.get("brick_growth_ratio", 0.5)),
         zxdq_ratio=cfg_brick.get("zxdq_ratio"),
         zxdq_span=int(cfg_brick.get("zxdq_span", 10)),
         require_zxdq_gt_zxdkx=bool(cfg_brick.get("require_zxdq_gt_zxdkx", True)),
+        require_close_gt_zxdq=bool(cfg_brick.get("require_close_gt_zxdq", True)),
+        zxdq_close_ratio=float(cfg_brick.get("zxdq_close_ratio", 0.98)),
         zxdkx_m1=int(cfg_brick.get("zxdkx_m1", 14)),
         zxdkx_m2=int(cfg_brick.get("zxdkx_m2", 28)),
         zxdkx_m3=int(cfg_brick.get("zxdkx_m3", 57)),
@@ -280,6 +280,7 @@ def run_preselect(
     data_dir: Optional[str] = None,
     end_date: Optional[str] = None,
     pick_date: Optional[str] = None,
+    strategies: Optional[List[str]] = None,
 ) -> Tuple[pd.Timestamp, List[Candidate]]:
     """
     量化初选主函数，返回 (pick_date_ts, List[Candidate])。
@@ -291,6 +292,7 @@ def run_preselect(
     data_dir    : CSV 目录（None = 读配置）
     end_date    : 数据截断日期（回测用）
     pick_date   : 选股基准日期（None = 自动最新）
+    strategies  : 指定运行的策略列表，如 ["b1"] / ["brick"]（None = 运行所有已启用的策略）
     """
     cfg = load_config(config_path)
     g = cfg.get("global", {})
@@ -327,18 +329,21 @@ def run_preselect(
 
     logger.info("流动性池: %d 只", len(pool_codes))
 
+    # 解析策略过滤列表
+    enabled_strategies = [s for s in (strategies or [])]
+    run_all = enabled_strategies == []
+
     # 6) 运行各策略
     all_candidates: List[Candidate] = []
 
-    if cfg.get("b1", {}).get("enabled", True):
-        all_candidates.extend(run_b1(prepared, pick_ts, pool_codes, cfg["b1"]))
+    if run_all or "b1" in enabled_strategies:
+        if cfg.get("b1", {}).get("enabled", True):
+            all_candidates.extend(run_b1(prepared, pick_ts, pool_codes, cfg["b1"]))
 
-    if cfg.get("brick", {}).get("enabled", True):
-        all_candidates.extend(run_brick(prepared, pick_ts, pool_codes, cfg["brick"]))
+    if run_all or "brick" in enabled_strategies:
+        if cfg.get("brick", {}).get("enabled", True):
+            all_candidates.extend(run_brick(prepared, pick_ts, pool_codes, cfg["brick"]))
 
-    # 7) 去重（同一只保留首次命中的策略）
-    seen: set = set()
-    deduped = [c for c in all_candidates if not (c.code in seen or seen.add(c.code))]  # type: ignore[func-returns-value]
-
-    logger.info("初选完成，候选股票: %d 只", len(deduped))
-    return pick_ts, deduped
+    # 7) 允许同一股票命中多个策略，下游各策略独立评审
+    logger.info("初选完成，候选股票: %d 只次（含跨策略重复）", len(all_candidates))
+    return pick_ts, all_candidates

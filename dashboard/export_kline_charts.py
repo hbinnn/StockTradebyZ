@@ -30,21 +30,39 @@ from components.charts import make_daily_chart, make_weekly_chart  # noqa: E402
 
 # ── 数据加载 ──────────────────────────────────────────────────────────────────
 
-def _load_candidates(candidates_path: Path) -> tuple[list[str], str]:
-    """从 candidates JSON 文件中读取股票代码列表及 pick_date。
+def _load_candidates(candidates_path: Path) -> tuple[list[dict], str]:
+    """从 candidates JSON 文件中读取候选股票列表及 pick_date。
 
     Returns:
-        (codes, pick_date)  pick_date 为空字符串时表示 JSON 中无该字段。
+        (candidates, pick_date)  candidates 包含完整 dict（含 code、strategy 等字段）
     """
     if not candidates_path.exists():
         print(f"[ERROR] 候选文件不存在：{candidates_path}")
         sys.exit(1)
     with open(candidates_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    codes = [c["code"] for c in data.get("candidates", [])]
+    candidates: list[dict] = data.get("candidates", [])
     pick_date = data.get("pick_date", "")
-    print(f"[INFO] 候选股票数量：{len(codes)}  pick_date：{pick_date or '(未设置)'}  来源：{candidates_path.name}")
-    return codes, pick_date
+    brick_count = sum(1 for c in candidates if c.get("strategy") == "brick")
+    print(f"[INFO] 候选股票数量：{len(candidates)}（砖型图 {brick_count} 只） pick_date：{pick_date or '(未设置)'}  来源：{candidates_path.name}")
+    return candidates, pick_date
+
+
+def _dedup_candidates(candidates: list[dict]) -> list[dict]:
+    """按 code 去重，若任一策略是 brick 则标记为砖型图图表。"""
+    seen: dict[str, dict] = {}
+    for c in candidates:
+        code = c["code"]
+        if code in seen:
+            # 合并策略标记：已有或新来的是 brick 则标记
+            if c.get("strategy") == "brick":
+                seen[code]["_is_brick"] = True
+                seen[code]["strategies"] = seen[code].get("strategies", []) + [c.get("strategy")]
+        else:
+            c["_is_brick"] = c.get("strategy") == "brick"
+            c["strategies"] = [c.get("strategy", "")]
+            seen[code] = c
+    return list(seen.values())
 
 
 def _load_raw(code: str, raw_dir: Path) -> pd.DataFrame:
@@ -88,11 +106,15 @@ CONFIG = {
 }
 
 
+# 砖型图计算参数（与 rules_preselect.yaml 保持一致）
+BRICK_PARAMS = {"n": 4, "m1": 4, "m2": 6, "m3": 6, "t": 4.0, "shift1": 90.0, "shift2": 100.0, "sma_w1": 1, "sma_w2": 1, "sma_w3": 1}
+
+
 def main() -> None:
     candidates_path = Path(CONFIG["candidates"])
     raw_dir         = Path(CONFIG["raw_dir"])
 
-    codes, pick_date = _load_candidates(candidates_path)
+    candidates, pick_date = _load_candidates(candidates_path)
 
     # 导出日期直接读取 candidates.json 的 pick_date
     export_date = pick_date
@@ -106,7 +128,12 @@ def main() -> None:
     ok_count    = 0
     skip_count  = 0
 
-    for code in codes:
+    codes_dedup = _dedup_candidates(candidates)
+
+    for c in codes_dedup:
+        code: str = c["code"]
+        strategies: list = c.get("strategies", [])
+        is_brick = c.get("_is_brick", False)
         df_raw = _load_raw(code, raw_dir)
         if df_raw.empty:
             print(f"[SKIP] {code}  — 无日线数据")
@@ -116,32 +143,21 @@ def main() -> None:
         # ── 日线图 ────────────────────────────────────────────────────
         day_path = out_root / f"{code}_day.jpg"
         try:
+            chart_height = CONFIG["day_height"] + 140 if is_brick else CONFIG["day_height"]
+            strategy_label = "+".join(strategies) if strategies else ""
             fig_day = make_daily_chart(
                 df_raw, code,
                 bars=CONFIG["bars"],
-                height=CONFIG["day_height"],
+                height=chart_height,
+                show_brick=is_brick,
+                brick_params=BRICK_PARAMS,
+                strategy=strategy_label,
             )
-            _export_fig(fig_day, day_path, CONFIG["day_width"], CONFIG["day_height"])
+            _export_fig(fig_day, day_path, CONFIG["day_width"], chart_height)
         except Exception as e:
             print(f"[ERROR] {code} 日线导出失败：{e}")
             skip_count += 1
             continue
-
-        # ── 周线图 ────────────────────────────────────────────────────
-        # week_path = out_root / f"{code}_week.jpg"
-        # try:
-        #     fig_week = make_weekly_chart(
-        #         df_raw, code,
-        #         bars=CONFIG["weekly_bars"],
-        #         height=CONFIG["week_height"],
-        #     )
-        #     _export_fig(fig_week, week_path, CONFIG["week_width"], CONFIG["week_height"])
-        # except Exception as e:
-        #     print(f"[ERROR] {code} 周线导出失败：{e}")
-        #     # 日线已成功，继续计数
-        #     print(f"[OK]   {code}  日线 ✓  周线 ✗")
-        #     ok_count += 1
-        #     continue
 
         print(f"[OK]   {code}  → {day_path.name}")
         ok_count += 1

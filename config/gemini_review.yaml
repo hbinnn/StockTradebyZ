@@ -12,6 +12,7 @@ output_dir: data/review
 
 # 提示词文件
 prompt_path: agent/prompt.md
+brick_prompt_path: agent/prompt_brick.md   # 砖型图策略专用 prompt
 
 # Gemini 模型名称
 model: gemini-3.1-pro-preview

@@ -47,19 +47,6 @@ def _kdj_core(rsv: np.ndarray) -> tuple:          # noqa: UP006
     J = 3.0 * K - 2.0 * D
     return K, D, J
 
-# ── 连续绿柱计数 ──────────────────────────────────────────────────────────
-@_njit(cache=True)
-def _green_run(brick_vals: np.ndarray) -> np.ndarray:
-    """green_run[i] = 截至 i-1 连续绿柱根数（brick < 0）。"""
-    n = len(brick_vals)
-    out = np.zeros(n, dtype=np.int32)
-    for i in range(1, n):
-        if brick_vals[i - 1] < 0.0:
-            out[i] = out[i - 1] + 1
-        else:
-            out[i] = 0
-    return out
-
 # ── 成交量最大日非阴线核心 ───────────────────────────────────────────────
 @_njit(cache=True)
 def _max_vol_not_bearish(
@@ -560,18 +547,14 @@ class BrickComputeParams:
 @dataclass(frozen=True)
 class BrickPatternFilter:
     """
-    砖型图形态过滤（条件 1-5）：
-      1. 今日涨幅 < daily_return_threshold
-      2. 今日红柱（brick > 0）
-      3. 昨日绿柱（brick[-1] < 0）
-      4. 今日红柱高度 >= brick_growth_ratio × 昨日绿柱绝对高度
-      5. 红柱前连续绿柱数 >= min_prior_green_bars
+    砖型图形态过滤：
+      1. 今日红柱（brick > 0）
+      2. 昨日绿柱（brick[-1] < 0）
+      3. 今日红柱高度 >= brick_growth_ratio × 昨日绿柱绝对高度
 
     优先读 df 中预计算列 'brick'。
     """
-    daily_return_threshold: float = 0.05
-    brick_growth_ratio:     float = 1.0
-    min_prior_green_bars:   int   = 1
+    brick_growth_ratio: float = 0.5
     brick_params: BrickComputeParams = field(default_factory=BrickComputeParams)
 
     def _brick_arr(self, hist: pd.DataFrame) -> np.ndarray:
@@ -580,12 +563,7 @@ class BrickPatternFilter:
         return self.brick_params.compute_arr(hist)
 
     def __call__(self, hist: pd.DataFrame) -> bool:
-        min_len = max(3, 1 + self.min_prior_green_bars + 1)
-        if len(hist) < min_len:
-            return False
-        close = hist["close"].to_numpy(dtype=float)
-        c0, c1 = close[-1], close[-2]
-        if c1 <= 0 or (c0 / c1 - 1.0) >= self.daily_return_threshold:
+        if len(hist) < 3:
             return False
         vals = self._brick_arr(hist)
         b0, b1 = vals[-1], vals[-2]
@@ -593,39 +571,21 @@ class BrickPatternFilter:
             return False
         if b0 < self.brick_growth_ratio * abs(b1):
             return False
-        # 连续绿柱
-        green_count = 1
-        i = len(vals) - 3
-        while green_count < self.min_prior_green_bars and i > 0:
-            if vals[i] < 0:
-                green_count += 1
-                i -= 1
-            else:
-                break
-        return green_count >= self.min_prior_green_bars
+        return True
 
     def vec_mask(self, df: pd.DataFrame) -> np.ndarray:
         """向量化：O(N)，使用预计算 'brick' 列（优先）或实时计算。"""
         bv  = self._brick_arr(df)
-        cv  = df["close"].to_numpy(dtype=float)
 
         # 安全 shift（不用 np.roll，避免边界回绕）
         bp  = np.empty_like(bv);  bp[0]  = np.nan; bp[1:]  = bv[:-1]
-        cp  = np.empty_like(cv);  cp[0]  = np.nan; cp[1:]  = cv[:-1]
         abp = np.abs(bp)
 
-        cond_ret    = (cv / cp - 1.0) < self.daily_return_threshold
         cond_red    = bv > 0
         cond_green  = bp < 0
         cond_growth = bv >= self.brick_growth_ratio * abp
 
-        if self.min_prior_green_bars <= 1:
-            cond_gc = cond_green
-        else:
-            gr      = _green_run(bv)
-            cond_gc = cond_green & (gr >= self.min_prior_green_bars)
-
-        return cond_ret & cond_red & cond_gc & cond_growth
+        return cond_red & cond_green & cond_growth
 
     def brick_growth_arr(self, df: pd.DataFrame) -> np.ndarray:
         """每日砖型图增长倍数数组（用于 top-k 排序）。"""
@@ -773,13 +733,34 @@ class B1Selector(PipelineSelector):
 # BrickChartSelector
 # ─────────────────────────────────────────────────────────────────────────────
 
+@dataclass(frozen=True)
+class CloseAboveZXDQFilter:
+    """close >= zxdq * ratio（默认 0.98，即收盘价在知行趋势线 98% 以上）。"""
+    ratio: float = 0.98
+
+    def _zxdq_arr(self, df: pd.DataFrame) -> np.ndarray:
+        return df["zxdq"].to_numpy(dtype=float)
+
+    def __call__(self, hist: pd.DataFrame) -> bool:
+        zv = float(hist["zxdq"].iloc[-1])
+        if not np.isfinite(zv) or zv <= 0:
+            return False
+        return float(hist["close"].iloc[-1]) >= zv * self.ratio
+
+    def vec_mask(self, df: pd.DataFrame) -> np.ndarray:
+        zxdq_v  = self._zxdq_arr(df)
+        close_v = df["close"].to_numpy(dtype=float)
+        return np.isfinite(zxdq_v) & (zxdq_v > 0) & (close_v >= zxdq_v * self.ratio)
+
+
 class BrickChartSelector(PipelineSelector):
     """
-    砖型图选股器，由以下四个独立模块组成：
-      ① BrickPatternFilter   — 形态（红/绿柱 + 涨幅 + 连续绿柱数）
-      ② ZXDQRatioFilter      — close < zxdq × ratio          [可选]
-      ③ ZXConditionFilter     — zxdq > zxdkx                  [可选]
-      ④ WeeklyMABullFilter   — 周线多头排列                    [可选]
+    砖型图选股器，由以下五个独立模块组成：
+      ① BrickPatternFilter    — 形态（红/绿柱 + 增长倍数）
+      ② ZXDQRatioFilter       — close < zxdq × ratio          [可选]
+      ③ ZXConditionFilter      — zxdq > zxdkx                  [可选]
+      ④ CloseAboveZXDQFilter   — close >= zxdq × ratio         [可选]
+      ⑤ WeeklyMABullFilter    — 周线多头排列                    [可选]
 
     快速用法::
 
@@ -795,9 +776,7 @@ class BrickChartSelector(PipelineSelector):
         self,
         *,
         # ── 砖型图形态参数 ──
-        daily_return_threshold: float = 0.05,
-        brick_growth_ratio:     float = 1.0,
-        min_prior_green_bars:   int   = 1,
+        brick_growth_ratio: float = 0.5,
         # ── 砖型图计算参数 ──
         n:      int   = 4,  m1: int = 4, m2: int = 6, m3: int = 6,
         t:      float = 4.0, shift1: float = 90.0, shift2: float = 100.0,
@@ -809,6 +788,8 @@ class BrickChartSelector(PipelineSelector):
         # ── 条件开关 ──
         zxdq_ratio:             Optional[float] = 1.0,
         require_zxdq_gt_zxdkx: bool = True,
+        require_close_gt_zxdq:  bool = True,
+        zxdq_close_ratio:       float = 0.98,
         require_weekly_ma_bull: bool = True,
         # ── 周线参数 ──
         wma_short: int = 20, wma_mid: int = 60, wma_long: int = 120,
@@ -822,9 +803,7 @@ class BrickChartSelector(PipelineSelector):
             sma_w1=sma_w1, sma_w2=sma_w2, sma_w3=sma_w3,
         )
         self._pattern_filter = BrickPatternFilter(
-            daily_return_threshold=daily_return_threshold,
             brick_growth_ratio=brick_growth_ratio,
-            min_prior_green_bars=min_prior_green_bars,
             brick_params=self._bp,
         )
         self._zxdq_ratio_filter: Optional[ZXDQRatioFilter] = (
@@ -843,6 +822,10 @@ class BrickChartSelector(PipelineSelector):
                 require_short_gt_long=True,
             ) if require_zxdq_gt_zxdkx else None
         )
+        self._close_gt_zxdq_filter: Optional[CloseAboveZXDQFilter] = (
+            CloseAboveZXDQFilter(ratio=zxdq_close_ratio)
+            if require_close_gt_zxdq else None
+        )
         self._wma_filter: Optional[WeeklyMABullFilter] = (
             WeeklyMABullFilter(wma_short=wma_short, wma_mid=wma_mid, wma_long=wma_long)
             if require_weekly_ma_bull else None
@@ -850,13 +833,14 @@ class BrickChartSelector(PipelineSelector):
 
         # 传给基类的 filters（用于 _passes / passes_hist）
         _filters: list = [self._pattern_filter]
-        if self._zxdq_ratio_filter is not None: _filters.append(self._zxdq_ratio_filter)
-        if self._zxdq_gt_filter    is not None: _filters.append(self._zxdq_gt_filter)
-        if self._wma_filter        is not None: _filters.append(self._wma_filter)
+        if self._zxdq_ratio_filter      is not None: _filters.append(self._zxdq_ratio_filter)
+        if self._zxdq_gt_filter         is not None: _filters.append(self._zxdq_gt_filter)
+        if self._close_gt_zxdq_filter   is not None: _filters.append(self._close_gt_zxdq_filter)
+        if self._wma_filter             is not None: _filters.append(self._wma_filter)
 
         super().__init__(
             _filters, date_col=date_col,
-            min_bars=max(n + 3, 1 + min_prior_green_bars + 1, zxdkx_m4, wma_long * 5),
+            min_bars=max(n + 3, zxdkx_m4, wma_long * 5),
             extra_bars_buffer=extra_bars_buffer,
         )
         # 保存参数供 prepare_df
@@ -891,9 +875,10 @@ class BrickChartSelector(PipelineSelector):
 
     def _compute_vec_pick(self, df: pd.DataFrame) -> np.ndarray:
         fs: list = [self._pattern_filter]
-        if self._zxdq_ratio_filter is not None: fs.append(self._zxdq_ratio_filter)
-        if self._zxdq_gt_filter    is not None: fs.append(self._zxdq_gt_filter)
-        if self._wma_filter        is not None: fs.append(self._wma_filter)
+        if self._zxdq_ratio_filter      is not None: fs.append(self._zxdq_ratio_filter)
+        if self._zxdq_gt_filter         is not None: fs.append(self._zxdq_gt_filter)
+        if self._close_gt_zxdq_filter   is not None: fs.append(self._close_gt_zxdq_filter)
+        if self._wma_filter             is not None: fs.append(self._wma_filter)
         return _apply_vec_filters(df, fs)
 
     # ── 公开接口 ───────────────────────────────────────────────────────────

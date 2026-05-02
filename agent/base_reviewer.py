@@ -20,6 +20,9 @@ class BaseReviewer:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.prompt = self.load_prompt(Path(config["prompt_path"]))
+        # 砖型图策略可选专用 prompt
+        brick_prompt_path = config.get("brick_prompt_path")
+        self.prompt_brick = self.load_prompt(Path(brick_prompt_path)) if brick_prompt_path else self.prompt
         self.kline_dir = Path(config["kline_dir"])
         self.output_dir = Path(config["output_dir"])
 
@@ -95,7 +98,8 @@ class BaseReviewer:
 
         for i, candidate in enumerate(candidates, 1):
             code: str = candidate["code"]
-            out_file = out_dir / f"{code}.json"
+            strategy: str = candidate.get("strategy", "b1")
+            out_file = out_dir / f"{code}_{strategy}.json"
 
             if self.config.get("skip_existing", False) and out_file.exists():
                 print(f"[{i}/{len(candidates)}] {code} — 已存在，跳过。")
@@ -110,13 +114,15 @@ class BaseReviewer:
                 failed_codes.append(code)
                 continue
 
-            print(f"[{i}/{len(candidates)}] {code} — 正在分析 ...", end=" ", flush=True)
+            # 根据策略选择对应的 prompt
+            prompt = self.prompt_brick if strategy == "brick" else self.prompt
+            print(f"[{i}/{len(candidates)}] {code} ({strategy}) — 正在分析 ...", end=" ", flush=True)
 
             try:
                 result = self.review_stock(
                     code=code,
                     day_chart=day_chart,
-                    prompt=self.prompt,
+                    prompt=prompt,
                 )
                 with open(out_file, "w", encoding="utf-8") as f:
                     json.dump(result, f, ensure_ascii=False, indent=2)

@@ -311,12 +311,16 @@ def make_daily_chart(
     zx_params: Optional[dict] = None,
     show_brick: bool = False,
     brick_params: Optional[dict] = None,
+    strategy: str = "",
 ) -> go.Figure:
     """
-    日线图：K线 + 知行短期线 + 知行长期线 + 量能
+    日线图：K线 + 知行短期线 + 知行长期线 + 量能 + 砖型图（可选）。
+
     知行线在完整数据上预热后截断，保证均线正确性。
+    show_brick=True 时在第三行渲染砖型图红/绿柱。
     """
     zx_params = zx_params or {}
+    brick_params = brick_params or {}
 
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
@@ -327,20 +331,36 @@ def make_daily_chart(
     df["_zxdq"]  = zxdq.values
     df["_zxdkx"] = zxdkx.values
 
+    # 砖型图（在全量数据上预热后截断）
+    if show_brick:
+        df["_brick"] = _calc_brick(df, **brick_params).values
+
     if bars > 0:
         df = df.tail(bars).reset_index(drop=True)
 
     x = df["date"]
     up_mask = df["close"] >= df["open"]
 
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        row_heights=[0.75, 0.25],
-        vertical_spacing=0.03,
-        subplot_titles=[f"{code}  日线", "成交量"],
-        specs=[[{"type": "candlestick"}], [{"type": "bar"}]],
-    )
+    # 根据是否显示砖型图调整布局
+    if show_brick:
+        strategy_label = f"  [{strategy}]" if strategy else ""
+        fig = make_subplots(
+            rows=3, cols=1,
+            shared_xaxes=True,
+            row_heights=[0.55, 0.20, 0.25],
+            vertical_spacing=0.03,
+            subplot_titles=[f"{code}  日线{strategy_label}", "成交量", "砖型图"],
+            specs=[[{"type": "candlestick"}], [{"type": "bar"}], [{"type": "bar"}]],
+        )
+    else:
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            row_heights=[0.75, 0.25],
+            vertical_spacing=0.03,
+            subplot_titles=[f"{code}  日线", "成交量"],
+            specs=[[{"type": "candlestick"}], [{"type": "bar"}]],
+        )
 
     # ── K 线 ──────────────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
@@ -371,17 +391,50 @@ def make_daily_chart(
     ), row=1, col=1)
 
     # ── 成交量 ────────────────────────────────────────────────────────
+    vol_row = 2
     vol_colors = np.where(up_mask, volume_up_color, volume_down_color)
     fig.add_trace(go.Bar(
         x=x, y=df["volume"],
         marker_color=vol_colors.tolist(),
         name="成交量",
         showlegend=False,
-    ), row=2, col=1)
+    ), row=vol_row, col=1)
+
+    # ── 砖型图 ────────────────────────────────────────────────────────
+    if show_brick:
+        brick_raw = df["_brick"].to_numpy(dtype=float)
+        # 前日 raw 值作为柱的基准
+        brick_prev = np.empty_like(brick_raw)
+        brick_prev[0] = np.nan
+        brick_prev[1:] = brick_raw[:-1]
+
+        red_mask  = brick_raw > brick_prev
+        green_mask = brick_raw < brick_prev
+
+        # 红柱：从 brick_prev 向上画到 brick_raw
+        fig.add_trace(go.Bar(
+            x=x,
+            y=np.where(red_mask, brick_raw - brick_prev, np.nan),
+            base=np.where(red_mask, brick_prev, np.nan),
+            marker_color="#dc3545",
+            name="砖型图(涨)",
+            showlegend=False,
+        ), row=3, col=1)
+
+        # 绿柱：从 brick_raw 向上画到 brick_prev（即向下柱）
+        fig.add_trace(go.Bar(
+            x=x,
+            y=np.where(green_mask, brick_prev - brick_raw, np.nan),
+            base=np.where(green_mask, brick_raw, np.nan),
+            marker_color="#28a745",
+            name="砖型图(跌)",
+            showlegend=False,
+        ), row=3, col=1)
 
     # ── 布局 ──────────────────────────────────────────────────────────
+    n_rows = 3 if show_brick else 2
     fig.update_layout(height=height, **_LIGHT_LAYOUT)
-    _apply_axis_style(fig, 2, _calc_rangebreaks_daily(pd.DatetimeIndex(x)))
+    _apply_axis_style(fig, n_rows, _calc_rangebreaks_daily(pd.DatetimeIndex(x)))
     for ann in fig.layout.annotations:
         ann.font = dict(color="#636c76", size=11)
 

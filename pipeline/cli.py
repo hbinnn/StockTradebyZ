@@ -50,11 +50,19 @@ def _add_log_file(log_dir: str, pick_date: str) -> None:
 def cmd_preselect(args: argparse.Namespace) -> None:
     logger.info("===== 量化初选开始 =====")
 
+    # 解析策略参数
+    strategy_list = None
+    if args.strategies:
+        strategy_list = [s.strip() for s in args.strategies.split(",") if s.strip()]
+        if strategy_list:
+            logger.info("指定策略: %s", strategy_list)
+
     pick_ts, candidates = run_preselect(
         config_path=args.config or None,
         data_dir=args.data or None,
         end_date=args.end_date or None,
         pick_date=args.date or None,
+        strategies=strategy_list,
     )
 
     pick_date_str = pick_ts.strftime("%Y-%m-%d")
@@ -122,6 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="候选输出目录（默认 data/candidates/）")
     p.add_argument("--log-dir", dest="log_dir", default=None,
                    help="流水日志目录（默认 data/logs/）")
+    p.add_argument("--strategies", default=None,
+                   help="指定运行策略，逗号分隔（如 b1,brick），默认运行所有已启用策略")
 
     return parser
 

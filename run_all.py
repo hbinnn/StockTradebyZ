@@ -124,6 +124,12 @@ def main() -> None:
         default=None,
         help="阿里云百炼使用的模型名称（如 kimi-k2.6、qwen3.6-plus 等）",
     )
+    parser.add_argument(
+        "--strategies",
+        type=str,
+        default=None,
+        help="指定选股策略，逗号分隔（如 b1,brick），默认运行所有已启用策略",
+    )
     args = parser.parse_args()
 
     start = args.start_from
@@ -140,10 +146,11 @@ def main() -> None:
 
     # ── 步骤 2：量化初选 ─────────────────────────────────────────────
     if start <= 2:
-        _run(
-            "2/8  量化初选（cli preselect）",
-            [PYTHON, "-m", "pipeline.cli", "preselect"],
-        )
+        step2_cmd = [PYTHON, "-m", "pipeline.cli", "preselect"]
+        if args.strategies:
+            step2_cmd += ["--strategies", args.strategies]
+        strategy_desc = f"（策略: {args.strategies}）" if args.strategies else ""
+        _run(f"2/8  量化初选（cli preselect）{strategy_desc}", step2_cmd)
 
     # ── 步骤 3：导出 K 线图 ──────────────────────────────────────────
     if start <= 3:

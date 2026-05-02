@@ -6,6 +6,7 @@ candidates: "data/candidates/candidates_latest.json"
 kline_dir: "data/kline"
 output_dir: "data/review"
 prompt_path: "agent/prompt.md"
+brick_prompt_path: "agent/prompt_brick.md"   # 砖型图策略专用 prompt
 
 # LM Studio API 配置
 api_url: "http://192.168.1.107:1234/v1/chat/completions"

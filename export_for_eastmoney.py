@@ -35,10 +35,15 @@ def load_suggestion(review_dir: Path) -> tuple[list[dict], str, str]:
         data = json.load(f)
 
     pick_date = data.get("date", "")
+    seen: set = set()
     recommendations = []
     for r in data.get("recommendations", []):
+        code = r.get("code", "")
+        if code in seen:
+            continue
+        seen.add(code)
         recommendations.append({
-            "code": r.get("code", ""),
+            "code": code,
             "total_score": r.get("total_score", 0),
             "verdict": r.get("verdict", ""),
             "signal_type": r.get("signal_type", ""),
@@ -65,11 +70,16 @@ def load_candidates_directly(candidates_file: Path) -> tuple[list[dict], str, st
         strategies.add(strategy.upper() if isinstance(strategy, str) else "B1")
     strategy_str = "_".join(sorted(strategies)) if strategies else "B1"
 
-    # 转换为统一格式
+    # 转换为统一格式，按 code 去重
+    seen: set = set()
     recommendations = []
     for cand in candidates:
+        code = cand.get("code", "")
+        if code in seen:
+            continue
+        seen.add(code)
         recommendations.append({
-            "code": cand.get("code", ""),
+            "code": code,
             "strategy": cand.get("strategy", ""),
             "close": cand.get("close", 0),
             "total_score": 5.0,  # 默认满分，无AI评分时所有股票都导出

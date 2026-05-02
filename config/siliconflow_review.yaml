@@ -6,6 +6,7 @@ candidates: "data/candidates/candidates_latest.json"
 kline_dir: "data/kline"
 output_dir: "data/review"
 prompt_path: "agent/prompt.md"
+brick_prompt_path: "agent/prompt_brick.md"   # 砖型图策略专用 prompt
 
 # SiliconFlow 模型参数
 model: "Pro/moonshotai/Kimi-K2.6"
