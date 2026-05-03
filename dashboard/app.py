@@ -237,101 +237,167 @@ if not candidates:
 label = "历史选股" if selected_date else "今日选股"
 st.markdown(f"## 📊 {label} · {pick_date}")
 
-# 聚合候选（按 code 合并多策略）
-by_code: dict[str, dict] = {}
-for c in candidates:
+# ── Level 1: 策略总览卡片 ──────────────────────────────────────────────────
+
+strategy_labels_map = {"b1": "B1", "brick": "砖型图", "b2": "B2", "b3": "B3"}
+filtered_cs = [c for c in candidates if c.get("strategy", "") in selected_strategies]
+
+# 按策略统计
+strat_stats: dict[str, dict] = {}
+for c in filtered_cs:
     s = c.get("strategy", "")
-    if s not in selected_strategies:
-        continue
+    if s not in strat_stats:
+        strat_stats[s] = {"total": 0, "PASS": 0, "WATCH": 0, "FAIL": 0, "no_review": 0}
+    strat_stats[s]["total"] += 1
     code = c["code"]
-    if code not in by_code:
-        by_code[code] = {"code": code, "close": c.get("close", 0), "strategies": {}}
-    by_code[code]["strategies"][s] = c
+    rm = review_map.get(code, {}).get(s)
+    if rm:
+        v = rm.get("verdict", "")
+        strat_stats[s][v] = strat_stats[s].get(v, 0) + 1
+    else:
+        strat_stats[s]["no_review"] += 1
 
-codes_sorted = sorted(by_code.keys())
+total_count = len(filtered_cs)
+pass_count = sum(v["PASS"] for v in strat_stats.values())
+watch_count = sum(v["WATCH"] for v in strat_stats.values())
+fail_count = sum(v["FAIL"] for v in strat_stats.values())
 
-if not codes_sorted:
+cols = st.columns(len(strat_stats) + 1 if strat_stats else 1)
+cols[0].metric("总计", total_count, help=f"PASS:{pass_count} WATCH:{watch_count} FAIL:{fail_count}")
+for i, (s, stats) in enumerate(sorted(strat_stats.items())):
+    label_s = strategy_labels_map.get(s, s.upper())
+    detail = f"PASS:{stats['PASS']} WATCH:{stats['WATCH']} FAIL:{stats['FAIL']}"
+    if stats["no_review"] > 0:
+        detail += f" 待评:{stats['no_review']}"
+    cols[i + 1].metric(label_s, stats["total"], help=detail)
+
+st.markdown("---")
+
+# ── 构建表格数据 ────────────────────────────────────────────────────────────
+
+table_rows = []
+for c in filtered_cs:
+    code = c["code"]
+    s = c.get("strategy", "")
+    close_val = c.get("close", 0)
+    rm = review_map.get(code, {}).get(s)
+    score = rm.get("total_score") if rm else None
+    verdict = rm.get("verdict", "") if rm else ""
+    comment = (rm.get("comment", "") or "")[:60] if rm else ""
+
+    if min_score > 0 and (score is None or score < min_score):
+        continue
+
+    table_rows.append({
+        "代码": code,
+        "策略": s.upper(),
+        "收盘": f"{close_val:.2f}",
+        "评分": f"{score:.1f}" if score is not None else "—",
+        "判定": verdict,
+        "点评": comment,
+        "_code": code, "_strategy": s, "_score": score or 0, "_verdict": verdict,
+    })
+
+if not table_rows:
     st.info("当前筛选条件下无候选股票。")
     st.stop()
 
-# ── 候选列表 ─────────────────────────────────────────────────────────────────
+# 按评分降序排列
+table_rows.sort(key=lambda r: r["_score"], reverse=True)
 
-st.markdown(f"共 **{len(codes_sorted)}** 只股票")
+df_table = pd.DataFrame(table_rows)
 
-for code in codes_sorted:
-    info = by_code[code]
-    strategies = info["strategies"]
+# 判定列色标
+def _highlight_verdict(val):
+    colors = {"PASS": "background-color:#d4f5e2;color:#1a7f37;font-weight:600",
+              "WATCH": "background-color:#fff3cd;color:#856404;font-weight:600",
+              "FAIL": "background-color:#f8d7da;color:#721c24;font-weight:600"}
+    return colors.get(val, "")
 
-    # 获取最优评分（取所有策略中的最高分）
-    best_score = None
-    best_verdict = ""
-    best_comment = ""
-    for s_name in strategies:
-        rm = review_map.get(code, {}).get(s_name)
-        if rm:
-            s = rm.get("total_score", 0)
-            if best_score is None or s > best_score:
-                best_score = s
-                best_verdict = rm.get("verdict", "")
-                best_comment = rm.get("comment", "")
+styled = df_table.style.map(_highlight_verdict, subset=["判定"])
 
-    # 评分过滤
-    if best_score is not None and best_score < min_score:
-        continue
+st.markdown(f"共 **{len(table_rows)}** 条记录")
 
-    with st.container():
-        st.markdown('<div class="candidate-card">', unsafe_allow_html=True)
+# ── Level 2: 数据表格 ──────────────────────────────────────────────────────
 
-        col1, col2, col3, col4 = st.columns([2, 2, 1.5, 3])
+event = st.dataframe(
+    styled,
+    column_config={
+        "代码": st.column_config.TextColumn(width="small"),
+        "策略": st.column_config.TextColumn(width="small"),
+        "收盘": st.column_config.TextColumn(width="small"),
+        "评分": st.column_config.TextColumn(width="small"),
+        "判定": st.column_config.TextColumn(width="small"),
+        "点评": st.column_config.TextColumn(width="large"),
+    },
+    hide_index=True,
+    use_container_width=True,
+    height=min(38 * len(table_rows) + 38, 500),
+    on_select="rerun",
+    selection_mode="single-row",
+)
 
-        with col1:
-            st.markdown(f"### {code}")
-            badges = "&nbsp;".join(_strategy_badge(s) for s in strategies)
-            st.markdown(badges, unsafe_allow_html=True)
+# ── Level 3: 个股详情 ──────────────────────────────────────────────────────
 
-        with col2:
-            st.markdown(f"收盘价：**{info['close']:.2f}**")
-            for s_name, sc in strategies.items():
-                bg_val = sc.get("brick_growth") or (sc.get("extra", {}).get("brick_growth"))
-                if bg_val:
-                    st.caption(f"砖型增长：{bg_val:.2f}x")
+selected_rows = event.selection.get("rows", []) if hasattr(event, "selection") else []
+selected_idx = selected_rows[0] if selected_rows else None
 
-        with col3:
-            if best_score is not None:
-                color = _SCORE_COLORS.get(best_verdict, "#636c76")
-                st.markdown(f"评分：<b style='color:{color};font-size:1.4rem'>{best_score:.1f}</b>", unsafe_allow_html=True)
-                st.markdown(_verdict_badge(best_verdict), unsafe_allow_html=True)
+if selected_idx is not None and selected_idx < len(table_rows):
+    row = table_rows[selected_idx]
+    code = row["_code"]
+    strategy = row["_strategy"]
+
+    st.markdown("---")
+    st.markdown(f"### 📈 {code}  [{strategy.upper()}]")
+
+    df_raw = _load_raw(code)
+    if df_raw.empty:
+        st.warning("无日线数据")
+    else:
+        col_chart, col_review = st.columns([3, 2])
+
+        with col_chart:
+            bars_val = st.selectbox("K线数量", [60, 120, 250, 0], index=1, key=f"bars_{code}_{strategy}",
+                                    format_func=lambda x: f"近{x}根" if x else "全部")
+            has_brick = "brick" in [s.get("strategy","") for s in filtered_cs if s.get("code")==code]
+            has_kdj = strategy in ("b1", "b2", "b3")
+            fig = make_daily_chart(
+                df_raw, code,
+                volume_up_color=vol_up, volume_down_color=vol_down,
+                bars=bars_val, height=720 if (has_brick or has_kdj) else 560,
+                show_brick=True, show_kdj=True,
+                strategy=strategy.upper(),
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
+
+        with col_review:
+            rm = review_map.get(code, {}).get(strategy)
+            if rm:
+                score = rm.get("total_score", "?")
+                verdict = rm.get("verdict", "")
+                color = _SCORE_COLORS.get(verdict, "#636c76")
+                st.markdown(f"**评分**：<span style='font-size:1.6rem;color:{color};font-weight:700'>{score}</span>&nbsp;{_verdict_badge(verdict)}", unsafe_allow_html=True)
+                st.caption(rm.get("summary", ""))
+                st.markdown("**点评**")
+                st.markdown(rm.get("comment", "—"))
+
+                dims = rm.get("dimension_scores", rm.get("scores", {}))
+                if dims:
+                    st.markdown("**各维度评分**")
+                    for dim, info in dims.items():
+                        if isinstance(info, dict):
+                            ds = info.get("score", "?")
+                            dr = info.get("reason", "")
+                            st.caption(f"{dim}: **{ds}** {dr[:60]}")
+                        else:
+                            st.caption(f"{dim}: **{info}**")
             else:
-                st.caption("待评审")
+                st.info("暂无 AI 复评结果")
+                st.caption(f"收盘价：{row['收盘']}")
 
-        with col4:
-            if best_comment:
-                st.caption(best_comment[:80] + ("..." if len(best_comment) > 80 else ""))
-            # 每个策略的评审详情
-            for s_name in strategies:
-                rm = review_map.get(code, {}).get(s_name)
-                if rm:
-                    s = rm.get("total_score", "?")
-                    v = rm.get("verdict", "")
-                    color = _SCORE_COLORS.get(v, "#636c76")
-                    st.caption(f"{s_name}: <b style='color:{color}'>{s}</b> {v}", unsafe_allow_html=True)
-
-        # 展开查看 K 线图
-        with st.expander(f"📈 {code} K线图"):
-            df_raw = _load_raw(code)
-            if df_raw.empty:
-                st.warning("无日线数据")
-            else:
-                bars_val = st.selectbox("K线数量", [60, 120, 250, 0], index=1, key=f"bars_{code}", format_func=lambda x: f"近{x}根" if x else "全部")
-                # 砖型图策略候选显示砖型图子图
-                has_brick = "brick" in strategies
-                fig = make_daily_chart(
-                    df_raw, code,
-                    volume_up_color=vol_up, volume_down_color=vol_down,
-                    bars=bars_val, height=720 if has_brick else 600,
-                    show_brick=has_brick,
-                    strategy="+".join(strategies.keys()),
-                )
-                st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
-
-        st.markdown('</div>', unsafe_allow_html=True)
+            # 策略候选信息
+            cand = next((c for c in filtered_cs if c.get("code")==code and c.get("strategy")==strategy), None)
+            if cand:
+                extra = cand.get("extra", {})
+                if extra.get("brick_growth"):
+                    st.caption(f"砖型增长：{extra['brick_growth']:.2f}x")
