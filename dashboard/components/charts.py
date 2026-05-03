@@ -421,27 +421,29 @@ def make_daily_chart(
     brick_row = 3 if not show_kdj else (4 if show_kdj else 3)
 
     if show_kdj:
-        fig.add_trace(go.Scatter(
-            x=x, y=df["_kdj_k"],
-            mode="lines", name="K",
-            line=dict(color="#e67e22", width=1.0),
-            showlegend=False,
-        ), row=kdj_row, col=1)
-        fig.add_trace(go.Scatter(
-            x=x, y=df["_kdj_d"],
-            mode="lines", name="D",
-            line=dict(color="#2980b9", width=1.0),
-            showlegend=False,
-        ), row=kdj_row, col=1)
-        fig.add_trace(go.Scatter(
-            x=x, y=df["_kdj_j"],
-            mode="lines", name="J",
-            line=dict(color="#8e44ad", width=1.0),
-            showlegend=False,
-        ), row=kdj_row, col=1)
-        # 参考线 20/80
-        for level, color in [(20, "#636c76"), (80, "#636c76")]:
-            fig.add_hline(y=level, line_dash="dot", line_color=color,
+        for col_name, color, label in [("_kdj_k", "#e67e22", "K"), ("_kdj_d", "#2980b9", "D"), ("_kdj_j", "#8e44ad", "J")]:
+            vals = df[col_name].dropna()
+            fig.add_trace(go.Scatter(
+                x=x, y=df[col_name],
+                mode="lines", name=label,
+                line=dict(color=color, width=1.0),
+                showlegend=False,
+            ), row=kdj_row, col=1)
+            # 右侧文字标注
+            if len(vals) > 0:
+                last_val = float(vals.iloc[-1])
+                if np.isfinite(last_val):
+                    fig.add_annotation(
+                        x=x.iloc[-1], y=last_val,
+                        text=f"<b>{label}</b>",
+                        showarrow=False,
+                        xanchor="left", xshift=4,
+                        font=dict(color=color, size=10),
+                        row=kdj_row, col=1,
+                    )
+        # 参考线 20/50/80
+        for level, lc in [(20, "#636c76"), (50, "#b0b0b0"), (80, "#636c76")]:
+            fig.add_hline(y=level, line_dash="dot", line_color=lc,
                           opacity=0.3, row=kdj_row, col=1)
 
     # ── 砖型图 ────────────────────────────────────────────────────────

@@ -117,9 +117,9 @@ BRICK_PARAMS = {"n": 4, "m1": 4, "m2": 6, "m3": 6, "t": 4.0, "shift1": 90.0, "sh
 # 策略→图表特性映射（新增策略只需在此注册）
 _STRATEGY_CHART_FEATURES: dict[str, dict] = {
     "brick": {"show_brick": True, "height_extra": 180, "label": "砖型图"},
-    "b1":    {"show_kdj":   True, "height_extra": 100, "label": "B1"},
-    "b2":    {"show_kdj":   True, "height_extra": 100, "label": "B2"},
-    "b3":    {"show_kdj":   True, "height_extra": 100, "label": "B3"},
+    "b1":    {"show_kdj": True, "show_brick": True, "height_extra": 240, "label": "B1"},
+    "b2":    {"show_kdj": True, "show_brick": True, "height_extra": 240, "label": "B2"},
+    "b3":    {"show_kdj": True, "show_brick": True, "height_extra": 240, "label": "B3"},
 }
 
 # 运行时计算：哪些策略需要砖型图
