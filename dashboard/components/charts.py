@@ -310,14 +310,12 @@ def make_daily_chart(
     height: int = 560,
     zx_params: Optional[dict] = None,
     show_brick: bool = False,
+    show_kdj:  bool = False,
     brick_params: Optional[dict] = None,
     strategy: str = "",
 ) -> go.Figure:
     """
-    日线图：K线 + 知行短期线 + 知行长期线 + 量能 + 砖型图（可选）。
-
-    知行线在完整数据上预热后截断，保证均线正确性。
-    show_brick=True 时在第三行渲染砖型图红/绿柱。
+    日线图：K线 + 知行线 + 量能 + KDJ（可选）+ 砖型图（可选）。
     """
     zx_params = zx_params or {}
     brick_params = brick_params or {}
@@ -331,6 +329,13 @@ def make_daily_chart(
     df["_zxdq"]  = zxdq.values
     df["_zxdkx"] = zxdkx.values
 
+    # KDJ（在全量数据上预热后截断）
+    if show_kdj:
+        k, d, j = _calc_kdj(df)
+        df["_kdj_k"] = k.values
+        df["_kdj_d"] = d.values
+        df["_kdj_j"] = j.values
+
     # 砖型图（在全量数据上预热后截断）
     if show_brick:
         df["_brick"] = _calc_brick(df, **brick_params).values
@@ -341,26 +346,37 @@ def make_daily_chart(
     x = df["date"]
     up_mask = df["close"] >= df["open"]
 
-    # 根据是否显示砖型图调整布局
-    if show_brick:
+    # 根据子图数量调整布局
+    extra_rows = (1 if show_kdj else 0) + (1 if show_brick else 0)
+    total_rows = 2 + extra_rows
+
+    if total_rows == 2:
+        heights = [0.75, 0.25]
+        titles  = [f"{code}  日线", "成交量"]
+        specs   = [[{"type": "candlestick"}], [{"type": "bar"}]]
+    elif total_rows == 3 and show_kdj and not show_brick:
+        heights = [0.60, 0.20, 0.20]
+        titles  = [f"{code}  日线", "成交量", "KDJ"]
+        specs   = [[{"type": "candlestick"}], [{"type": "bar"}], [{"type": "scatter"}]]
+    elif total_rows == 3 and show_brick and not show_kdj:
         strategy_label = f"  [{strategy}]" if strategy else ""
-        fig = make_subplots(
-            rows=3, cols=1,
-            shared_xaxes=True,
-            row_heights=[0.55, 0.20, 0.25],
-            vertical_spacing=0.03,
-            subplot_titles=[f"{code}  日线{strategy_label}", "成交量", "砖型图"],
-            specs=[[{"type": "candlestick"}], [{"type": "bar"}], [{"type": "bar"}]],
-        )
-    else:
-        fig = make_subplots(
-            rows=2, cols=1,
-            shared_xaxes=True,
-            row_heights=[0.75, 0.25],
-            vertical_spacing=0.03,
-            subplot_titles=[f"{code}  日线", "成交量"],
-            specs=[[{"type": "candlestick"}], [{"type": "bar"}]],
-        )
+        heights = [0.55, 0.20, 0.25]
+        titles  = [f"{code}  日线{strategy_label}", "成交量", "砖型图"]
+        specs   = [[{"type": "candlestick"}], [{"type": "bar"}], [{"type": "bar"}]]
+    else:  # 4 rows: KDJ + brick
+        strategy_label = f"  [{strategy}]" if strategy else ""
+        heights = [0.50, 0.18, 0.16, 0.16]
+        titles  = [f"{code}  日线{strategy_label}", "成交量", "KDJ", "砖型图"]
+        specs   = [[{"type": "candlestick"}], [{"type": "bar"}], [{"type": "scatter"}], [{"type": "bar"}]]
+
+    fig = make_subplots(
+        rows=total_rows, cols=1,
+        shared_xaxes=True,
+        row_heights=heights,
+        vertical_spacing=0.03,
+        subplot_titles=titles,
+        specs=specs,
+    )
 
     # ── K 线 ──────────────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
@@ -400,10 +416,37 @@ def make_daily_chart(
         showlegend=False,
     ), row=vol_row, col=1)
 
+    # ── KDJ ────────────────────────────────────────────────────────────
+    kdj_row = 3 if not show_brick else 3
+    brick_row = 3 if not show_kdj else (4 if show_kdj else 3)
+
+    if show_kdj:
+        fig.add_trace(go.Scatter(
+            x=x, y=df["_kdj_k"],
+            mode="lines", name="K",
+            line=dict(color="#e67e22", width=1.0),
+            showlegend=False,
+        ), row=kdj_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=x, y=df["_kdj_d"],
+            mode="lines", name="D",
+            line=dict(color="#2980b9", width=1.0),
+            showlegend=False,
+        ), row=kdj_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=x, y=df["_kdj_j"],
+            mode="lines", name="J",
+            line=dict(color="#8e44ad", width=1.0),
+            showlegend=False,
+        ), row=kdj_row, col=1)
+        # 参考线 20/80
+        for level, color in [(20, "#636c76"), (80, "#636c76")]:
+            fig.add_hline(y=level, line_dash="dot", line_color=color,
+                          opacity=0.3, row=kdj_row, col=1)
+
     # ── 砖型图 ────────────────────────────────────────────────────────
     if show_brick:
         brick_raw = df["_brick"].to_numpy(dtype=float)
-        # 前日 raw 值作为柱的基准
         brick_prev = np.empty_like(brick_raw)
         brick_prev[0] = np.nan
         brick_prev[1:] = brick_raw[:-1]
@@ -411,7 +454,6 @@ def make_daily_chart(
         red_mask  = brick_raw > brick_prev
         green_mask = brick_raw < brick_prev
 
-        # 红柱：从 brick_prev 向上画到 brick_raw
         fig.add_trace(go.Bar(
             x=x,
             y=np.where(red_mask, brick_raw - brick_prev, np.nan),
@@ -419,9 +461,8 @@ def make_daily_chart(
             marker_color="#dc3545",
             name="砖型图(涨)",
             showlegend=False,
-        ), row=3, col=1)
+        ), row=brick_row, col=1)
 
-        # 绿柱：从 brick_raw 向上画到 brick_prev（即向下柱）
         fig.add_trace(go.Bar(
             x=x,
             y=np.where(green_mask, brick_prev - brick_raw, np.nan),
@@ -429,12 +470,11 @@ def make_daily_chart(
             marker_color="#28a745",
             name="砖型图(跌)",
             showlegend=False,
-        ), row=3, col=1)
+        ), row=brick_row, col=1)
 
     # ── 布局 ──────────────────────────────────────────────────────────
-    n_rows = 3 if show_brick else 2
     fig.update_layout(height=height, **_LIGHT_LAYOUT)
-    _apply_axis_style(fig, n_rows, _calc_rangebreaks_daily(pd.DatetimeIndex(x)))
+    _apply_axis_style(fig, total_rows, _calc_rangebreaks_daily(pd.DatetimeIndex(x)))
     for ann in fig.layout.annotations:
         ann.font = dict(color="#636c76", size=11)
 

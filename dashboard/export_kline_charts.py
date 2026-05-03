@@ -116,7 +116,10 @@ BRICK_PARAMS = {"n": 4, "m1": 4, "m2": 6, "m3": 6, "t": 4.0, "shift1": 90.0, "sh
 
 # 策略→图表特性映射（新增策略只需在此注册）
 _STRATEGY_CHART_FEATURES: dict[str, dict] = {
-    "brick": {"show_brick": True, "height_extra": 140, "label": "砖型图"},
+    "brick": {"show_brick": True, "height_extra": 180, "label": "砖型图"},
+    "b1":    {"show_kdj":   True, "height_extra": 100, "label": "B1"},
+    "b2":    {"show_kdj":   True, "height_extra": 100, "label": "B2"},
+    "b3":    {"show_kdj":   True, "height_extra": 100, "label": "B3"},
 }
 
 # 运行时计算：哪些策略需要砖型图
@@ -147,6 +150,7 @@ def main() -> None:
         code: str = c["code"]
         strategies: list = c.get("strategies", [])
         show_brick = c.get("show_brick", False)
+        show_kdj   = c.get("show_kdj", False)
         height_extra = c.get("height_extra", 0)
         df_raw = _load_raw(code, raw_dir)
         if df_raw.empty:
@@ -164,6 +168,7 @@ def main() -> None:
                 bars=CONFIG["bars"],
                 height=chart_height,
                 show_brick=show_brick,
+                show_kdj=show_kdj,
                 brick_params=BRICK_PARAMS,
                 strategy=strategy_label,
             )
