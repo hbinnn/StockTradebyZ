@@ -359,6 +359,71 @@ def _run_b2(
 
 
 # =============================================================================
+# B3 策略（B2 衍生：昨日B2突破 + 今日缩量休整）
+# =============================================================================
+
+def _b3_warmup(cfg: dict, buffer: int) -> int:
+    return max(int(cfg.get("zx_m4", 114)) + buffer, 120)
+
+
+@_register("b3", warmup_fn=_b3_warmup)
+def _run_b3(
+    prepared: Dict[str, pd.DataFrame],
+    pick_date: pd.Timestamp,
+    pool_codes: List[str],
+    cfg_b3: dict,
+) -> List[Candidate]:
+    """B3 策略：前一日满足 B2 + 当日缩量小K线休整。"""
+    from strategies.b3.selector import B3Selector
+
+    selector = B3Selector(
+        max_change=float(cfg_b3.get("max_change", 0.02)),
+        max_amplitude=float(cfg_b3.get("max_amplitude", 0.07)),
+        max_vol_ratio=float(cfg_b3.get("max_vol_ratio", 0.70)),
+        daily_gain_threshold=float(cfg_b3.get("daily_gain_threshold", 0.0385)),
+        j_max=float(cfg_b3.get("j_max", 80.0)),
+        j_threshold=float(cfg_b3.get("j_threshold", 20.0)),
+        j_q_threshold=float(cfg_b3.get("j_q_threshold", 0.10)),
+        kdj_n=int(cfg_b3.get("kdj_n", 9)),
+        zx_m1=int(cfg_b3.get("zx_m1", 14)),
+        zx_m2=int(cfg_b3.get("zx_m2", 28)),
+        zx_m3=int(cfg_b3.get("zx_m3", 57)),
+        zx_m4=int(cfg_b3.get("zx_m4", 114)),
+        zxdq_span=int(cfg_b3.get("zxdq_span", 10)),
+        require_close_gt_long=bool(cfg_b3.get("require_close_gt_long", True)),
+        require_short_gt_long=bool(cfg_b3.get("require_short_gt_long", True)),
+        wma_short=int(cfg_b3.get("wma_short", 5)),
+        wma_mid=int(cfg_b3.get("wma_mid", 10)),
+        wma_long=int(cfg_b3.get("wma_long", 20)),
+        max_vol_lookback=cfg_b3.get("max_vol_lookback"),
+    )
+
+    date_str = pick_date.strftime("%Y-%m-%d")
+    candidates: List[Candidate] = []
+
+    for code in pool_codes:
+        df = prepared.get(code)
+        if df is None or pick_date not in df.index:
+            continue
+        try:
+            pf = selector.prepare_df(df)
+            if selector.vec_picks_from_prepared(pf, start=pick_date, end=pick_date):
+                row = pf.loc[pick_date]
+                candidates.append(Candidate(
+                    code=code,
+                    date=date_str,
+                    strategy="b3",
+                    close=float(row["close"]),
+                    turnover_n=float(row["turnover_n"]),
+                ))
+        except Exception as exc:
+            logger.debug("B3 skip %s: %s", code, exc)
+
+    logger.info("B3 选出: %d 只", len(candidates))
+    return candidates
+
+
+# =============================================================================
 # 主入口
 # =============================================================================
 

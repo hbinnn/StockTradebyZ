@@ -185,7 +185,7 @@ with st.sidebar:
 
     # 统计
     filtered = [c for c in candidates if c.get("strategy", "") in selected_strategies]
-    strategy_labels = {"b1": "B1", "brick": "砖型图", "b2": "B2"}
+    strategy_labels = {"b1": "B1", "brick": "砖型图", "b2": "B2", "b3": "B3"}
 
     st.markdown("### 📊 统计")
     st.metric("候选总数", len(filtered))
@@ -223,7 +223,7 @@ def _verdict_badge(verdict: str) -> str:
 
 
 def _strategy_badge(s: str) -> str:
-    colors = {"b1": ("#daeeff", "#0969da"), "brick": ("#d4f5e2", "#1a7f37"), "b2": ("#fef3c7", "#b45309")}
+    colors = {"b1": ("#daeeff", "#0969da"), "brick": ("#d4f5e2", "#1a7f37"), "b2": ("#fef3c7", "#b45309"), "b3": ("#e8daef", "#6c3483")}
     bg, fg = colors.get(s, ("#e9ecef", "#636c76"))
     return f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:12px;font-weight:600;font-size:0.75rem'>{s.upper()}</span>"
 
