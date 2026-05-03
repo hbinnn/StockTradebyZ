@@ -228,8 +228,8 @@ distribution_risk → 出货风险
 # 六、判定规则
 
 PASS：total_score ≥ 4.0
-WATCH：3.2 ≤ total_score < 4.0
-FAIL：total_score < 3.2
+WATCH：3 ≤ total_score < 4.0
+FAIL：total_score < 3
 
 特殊规则：
 
