@@ -82,7 +82,7 @@ b2:
 
 # ── B3 策略参数（B2 衍生：昨日B2突破 + 今日缩量小K线休整） ──────────
 b3:
-  enabled: false
+  enabled: true
 
   # B3 专属参数
   max_change: 0.02               # 当日涨跌幅绝对值上限（2%）

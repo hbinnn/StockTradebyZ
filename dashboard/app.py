@@ -1,17 +1,16 @@
 """
 dashboard/app.py
-AgentTrader · 今日选股看板 — Streamlit 主入口
+AgentTrader · 量化初选看板 — Streamlit 主入口
 
 启动方式：
-    cd <项目根>
     streamlit run dashboard/app.py
 """
 from __future__ import annotations
 
-import json
-import sys
+import json, sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 import yaml
@@ -21,8 +20,22 @@ _DASH = Path(__file__).parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_DASH))
 
+from components.charts import make_daily_chart
+from components.backtest import render_backtest_button
 
-# ── 数据加载 ────────────────────────────────────────────────────────────────
+# ── 常量 ────────────────────────────────────────────────────────────────────
+
+STRATEGY_LABELS = {"b1": "B1", "brick": "砖型图", "b2": "B2", "b3": "B3"}
+STRATEGY_FEATURES = {
+    "b1":    {"show_kdj": True,  "show_brick": True},
+    "b2":    {"show_kdj": True,  "show_brick": True},
+    "b3":    {"show_kdj": True,  "show_brick": True},
+    "brick": {"show_kdj": False, "show_brick": True},
+}
+VERDICT_COLORS = {"PASS": ("#d4f5e2", "#1a7f37"), "WATCH": ("#fff3cd", "#856404"), "FAIL": ("#f8d7da", "#721c24")}
+SCORE_COLORS  = {"PASS": "#1a7f37", "WATCH": "#856404", "FAIL": "#721c24", "": "#636c76"}
+
+# ── 数据加载（缓存）──────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=30)
 def _load_cfg() -> dict:
@@ -31,13 +44,11 @@ def _load_cfg() -> dict:
 
 
 def _list_available_dates() -> list[str]:
-    """扫描 data/candidates/ 下所有存档日期（降序）。"""
     d = _ROOT / "data" / "candidates"
     if not d.exists():
         return []
     dates = set()
     for f in d.glob("candidates_*.json"):
-        # candidates_2026-04-30.json → 2026-04-30
         stem = f.stem
         if stem.startswith("candidates_"):
             dates.add(stem[len("candidates_"):])
@@ -46,7 +57,6 @@ def _list_available_dates() -> list[str]:
 
 @st.cache_data(ttl=30)
 def _load_candidates(pick_date: str = "") -> tuple[list[dict], str]:
-    """加载指定日期的候选列表。pick_date 为空则取 latest。"""
     if pick_date:
         p = _ROOT / "data" / "candidates" / f"candidates_{pick_date}.json"
     else:
@@ -62,32 +72,48 @@ def _load_candidates(pick_date: str = "") -> tuple[list[dict], str]:
 @st.cache_data(ttl=30)
 def _load_suggestion(pick_date: str) -> dict | None:
     p = _ROOT / "data" / "review" / pick_date / "suggestion.json"
-    if not p.exists():
-        return None
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    return json.load(open(p, encoding="utf-8")) if p.exists() else None
+
+
+def _normalize_review(r: dict) -> dict:
+    """统一 Schema A（scores 字段）和 Schema B（dimension_scores 字段）。"""
+    dims = r.get("dimension_scores") or r.get("scores") or {}
+    summary = r.get("summary") or ""
+    if not summary:
+        # Schema A 无 summary，用 signal_reasoning 截断
+        for key in ("signal_reasoning", "trend_reasoning"):
+            v = r.get(key, "")
+            if v:
+                summary = v[:120]
+                break
+    return {
+        "total_score": r.get("total_score"),
+        "verdict": r.get("verdict", ""),
+        "comment": r.get("comment", ""),
+        "summary": summary,
+        "dimension_scores": dims,
+    }
 
 
 @st.cache_data(ttl=30)
-def _load_review_map(pick_date: str) -> dict[str, dict]:
-    """返回 {code: {strategy: review_result, ...}, ...}"""
+def _load_review_map(pick_date: str) -> dict[str, dict[str, dict]]:
+    """{code: {strategy: normalized_review}}"""
     review_dir = _ROOT / "data" / "review" / pick_date
-    result: dict[str, dict] = {}
+    result: dict[str, dict[str, dict]] = {}
     if not review_dir.exists():
         return result
     for f in sorted(review_dir.glob("*.json")):
         if f.name == "suggestion.json":
             continue
-        # 文件名格式: {code}_{strategy}.json 或 {code}.json（旧格式）
         stem = f.stem
         if "_" in stem:
-            parts = stem.rsplit("_", 1)
-            code, strategy = parts[0], parts[1]
+            pos = stem.rfind("_")
+            code, strategy = stem[:pos], stem[pos+1:]
         else:
             code, strategy = stem, ""
         with open(f, encoding="utf-8") as fh:
             r = json.load(fh)
-        result.setdefault(code, {})[strategy] = r
+        result.setdefault(code, {})[strategy] = _normalize_review(r)
     return result
 
 
@@ -104,300 +130,299 @@ def _load_raw(code: str) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
-# ── 页面配置 ─────────────────────────────────────────────────────────────────
+# ── 页面配置 ────────────────────────────────────────────────────────────────
 
 cfg = _load_cfg()
-page_title = cfg.get("server", {}).get("title", "AgentTrader · 今日选股")
-
 st.set_page_config(
-    page_title=page_title,
+    page_title=cfg.get("server", {}).get("title", "AgentTrader · 量化初选看板"),
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
-
 css_path = _DASH / "assets" / "style.css"
 if css_path.exists():
     st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-from components.charts import make_daily_chart, make_weekly_chart
-
-# ── 图表参数 ─────────────────────────────────────────────────────────────────
-
-chart_cfg = cfg.get("chart", {})
-weekly_ma_wins = chart_cfg.get("weekly_ma_windows", [5, 10, 20, 60])
-weekly_ma_colors = {int(k): v for k, v in chart_cfg.get("weekly_ma_colors", {}).items()}
-vol_up = chart_cfg.get("volume_up_color", "rgba(220,53,69,0.7)")
-vol_down = chart_cfg.get("volume_down_color", "rgba(40,167,69,0.7)")
-
-# ── 会话状态 + 侧边栏（日期选择 → 数据加载）────────────────────────────────
+# ── 顶部栏 ──────────────────────────────────────────────────────────────────
 
 available_dates = _list_available_dates()
 if "selected_date" not in st.session_state:
     st.session_state["selected_date"] = ""
 
-with st.sidebar:
-    st.markdown("## 📈 AgentTrader")
-
-    # 日期选择器
+col_title, col_date = st.columns([4, 1])
+with col_title:
+    st.markdown("## 📊 AgentTrader · 量化初选看板")
+with col_date:
     if available_dates:
         date_options = ["最新"] + available_dates
         cur = st.session_state["selected_date"]
         default_idx = 0 if not cur else (date_options.index(cur) if cur in date_options else 0)
-        selected_label = st.selectbox("选股日期", date_options, index=default_idx)
+        selected_label = st.selectbox(
+            "选股日期", date_options, index=default_idx, key="date_selector", label_visibility="collapsed"
+        )
         st.session_state["selected_date"] = "" if selected_label == "最新" else selected_label
+    else:
+        st.caption("无历史数据")
 
 selected_date = st.session_state["selected_date"]
-
-# 按选中日期加载数据
 candidates, pick_date = _load_candidates(selected_date)
-if not pick_date:
-    for c in candidates:
-        if c.get("date"):
-            pick_date = c["date"]
-            break
+if not pick_date and candidates:
+    pick_date = candidates[0].get("date", "")
 
 review_map = _load_review_map(pick_date) if pick_date else {}
 suggestion = _load_suggestion(pick_date) if pick_date else None
-
-# ── 侧边栏（续）──────────────────────────────────────────────────────────────
-
-with st.sidebar:
-    if pick_date:
-        st.caption(f"选股日：{pick_date}")
-    st.markdown("---")
-
-    # 策略筛选
-    all_strategies = sorted(set(c.get("strategy", "") for c in candidates))
-    selected_strategies = st.multiselect(
-        "策略筛选", all_strategies, default=all_strategies,
-        format_func=lambda x: x.upper(),
-    )
-
-    # 评分门槛
-    if suggestion:
-        min_score = st.slider("最低评分", 1.0, 5.0, 3.0, 0.1)
-    else:
-        min_score = 0
-        st.caption("（暂无 AI 复评结果）")
-
-    st.markdown("---")
-
-    # 统计
-    filtered = [c for c in candidates if c.get("strategy", "") in selected_strategies]
-    strategy_labels = {"b1": "B1", "brick": "砖型图", "b2": "B2", "b3": "B3"}
-
-    st.markdown("### 📊 统计")
-    st.metric("候选总数", len(filtered))
-    counts = {}
-    for c in filtered:
-        s = c.get("strategy", "")
-        counts[s] = counts.get(s, 0) + 1
-    cols = st.columns(len(counts) if counts else 1)
-    for i, (s, n) in enumerate(sorted(counts.items())):
-        label = strategy_labels.get(s, s.upper())
-        cols[i].metric(label, n)
-
-    if suggestion:
-        recs = suggestion.get("recommendations", [])
-        st.metric("AI 推荐", len(recs))
-
-
-# ── 辅助函数 ─────────────────────────────────────────────────────────────────
-
-_VERDICT_COLORS = {
-    "PASS": ("#d4f5e2", "#1a7f37"),
-    "WATCH": ("#fff3cd", "#856404"),
-    "FAIL": ("#f8d7da", "#721c24"),
-}
-_SCORE_COLORS = {
-    "PASS": "#1a7f37", "WATCH": "#856404", "FAIL": "#721c24", "": "#636c76",
-}
-
-
-def _verdict_badge(verdict: str) -> str:
-    if not verdict:
-        return ""
-    bg, fg = _VERDICT_COLORS.get(verdict, ("#e9ecef", "#636c76"))
-    return f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:4px;font-weight:600;font-size:0.8rem'>{verdict}</span>"
-
-
-def _strategy_badge(s: str) -> str:
-    colors = {"b1": ("#daeeff", "#0969da"), "brick": ("#d4f5e2", "#1a7f37"), "b2": ("#fef3c7", "#b45309"), "b3": ("#e8daef", "#6c3483")}
-    bg, fg = colors.get(s, ("#e9ecef", "#636c76"))
-    return f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:12px;font-weight:600;font-size:0.75rem'>{s.upper()}</span>"
-
-
-# ── 主体 ─────────────────────────────────────────────────────────────────────
 
 if not candidates:
     st.info("暂无候选股票，请先运行量化初选。")
     st.stop()
 
-label = "历史选股" if selected_date else "今日选股"
-st.markdown(f"## 📊 {label} · {pick_date}")
+st.caption(f"选股日：{pick_date}　｜　共 {len(candidates)} 条候选记录")
+st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 
-# ── Level 1: 策略总览卡片 ──────────────────────────────────────────────────
+# ── 图表参数 ────────────────────────────────────────────────────────────────
 
-strategy_labels_map = {"b1": "B1", "brick": "砖型图", "b2": "B2", "b3": "B3"}
-filtered_cs = [c for c in candidates if c.get("strategy", "") in selected_strategies]
+chart_cfg = cfg.get("chart", {})
+vol_up   = chart_cfg.get("volume_up_color", "rgba(220,53,69,0.7)")
+vol_down = chart_cfg.get("volume_down_color", "rgba(40,167,69,0.7)")
 
-# 按策略统计
-strat_stats: dict[str, dict] = {}
-for c in filtered_cs:
-    s = c.get("strategy", "")
-    if s not in strat_stats:
-        strat_stats[s] = {"total": 0, "PASS": 0, "WATCH": 0, "FAIL": 0, "no_review": 0}
-    strat_stats[s]["total"] += 1
-    code = c["code"]
-    rm = review_map.get(code, {}).get(s)
-    if rm:
-        v = rm.get("verdict", "")
-        strat_stats[s][v] = strat_stats[s].get(v, 0) + 1
+
+# ── 可复用：策略标签页 ──────────────────────────────────────────────────────
+
+def _render_strategy_tab(strategy_name: str | None):
+    """渲染一个策略标签页的全部内容。strategy_name=None 表示总览。"""
+    tab_key = strategy_name or "overview"
+
+    # 筛选候选
+    if strategy_name is None:
+        tab_candidates = candidates
     else:
-        strat_stats[s]["no_review"] += 1
+        tab_candidates = [c for c in candidates if c.get("strategy") == strategy_name]
+    if not tab_candidates:
+        st.info("该策略无候选股票。")
+        return
 
-total_count = len(filtered_cs)
-pass_count = sum(v["PASS"] for v in strat_stats.values())
-watch_count = sum(v["WATCH"] for v in strat_stats.values())
-fail_count = sum(v["FAIL"] for v in strat_stats.values())
+    # ── 统计卡片 ─────────────────────────────────────────────────────────
+    stats = {"total": len(tab_candidates), "PASS": 0, "WATCH": 0, "FAIL": 0, "no_review": 0}
+    for c in tab_candidates:
+        code, s = c["code"], c.get("strategy", "")
+        rm = review_map.get(code, {}).get(s)
+        if rm:
+            v = rm.get("verdict", "")
+            stats[v] = stats.get(v, 0) + 1
+        else:
+            stats["no_review"] += 1
 
-cols = st.columns(len(strat_stats) + 1 if strat_stats else 1)
-cols[0].metric("总计", total_count, help=f"PASS:{pass_count} WATCH:{watch_count} FAIL:{fail_count}")
-for i, (s, stats) in enumerate(sorted(strat_stats.items())):
-    label_s = strategy_labels_map.get(s, s.upper())
-    detail = f"PASS:{stats['PASS']} WATCH:{stats['WATCH']} FAIL:{stats['FAIL']}"
-    if stats["no_review"] > 0:
-        detail += f" 待评:{stats['no_review']}"
-    cols[i + 1].metric(label_s, stats["total"], help=detail)
+    card_configs = [
+        ("总计", "total", "#1f2328", "#e9ecef"),
+        ("PASS", "PASS", "#1a7f37", "#d4f5e2"),
+        ("WATCH", "WATCH", "#856404", "#fff3cd"),
+        ("FAIL", "FAIL", "#721c24", "#f8d7da"),
+    ]
+    cols = st.columns(4)
+    for col, (label, key, fg, bg) in zip(cols, card_configs):
+        with col:
+            st.markdown(
+                f"""<div style="background:{bg};border-radius:10px;padding:14px 18px;text-align:center">
+                <div style="font-size:1.8rem;font-weight:700;color:{fg}">{stats[key]}</div>
+                <div style="font-size:0.78rem;color:#636c76">{label}</div></div>""",
+                unsafe_allow_html=True
+            )
 
-st.markdown("---")
+    st.markdown("")
 
-# ── 构建表格数据 ────────────────────────────────────────────────────────────
+    # ── 筛选 ─────────────────────────────────────────────────────────────
+    with st.expander("🔍 筛选与排序", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            verdicts = ["全部"] + sorted({v for c in tab_candidates for v in [
+                (review_map.get(c["code"], {}).get(c.get("strategy", ""), {}).get("verdict") or "")
+            ] if v})
+            sel_verdict = st.selectbox("判定", verdicts, key=f"fv_{tab_key}")
+        with c2:
+            score_range = st.slider("评分区间", 1.0, 5.0, (1.0, 5.0), 0.1, key=f"fs_{tab_key}")
+        with c3:
+            sort_options = ["评分↓", "评分↑", "收盘价↓", "收盘价↑"]
+            sort_by = st.selectbox("排序", sort_options, key=f"so_{tab_key}")
 
-table_rows = []
-for c in filtered_cs:
-    code = c["code"]
-    s = c.get("strategy", "")
-    close_val = c.get("close", 0)
-    rm = review_map.get(code, {}).get(s)
-    score = rm.get("total_score") if rm else None
-    verdict = rm.get("verdict", "") if rm else ""
-    comment = (rm.get("comment", "") or "")[:60] if rm else ""
+    # 应用筛选
+    rows = []
+    for c in tab_candidates:
+        code = c["code"]
+        s = c.get("strategy", "")
+        rm = review_map.get(code, {}).get(s)
+        score = rm.get("total_score") if rm else None
+        verdict = rm.get("verdict", "") if rm else ""
+        comment = (rm.get("comment", "") or "")[:80] if rm else ""
+        # 判定过滤
+        if sel_verdict != "全部" and verdict != sel_verdict:
+            continue
+        # 评分过滤
+        sc = score or 0
+        if sc < score_range[0] or sc > score_range[1]:
+            continue
+        rows.append({
+            "代码": code, "策略": s.upper(), "收盘": round(c.get("close", 0), 2),
+            "评分": score or 0, "判定": verdict, "点评": comment,
+            "_code": code, "_strategy": s,
+        })
 
-    if min_score > 0 and (score is None or score < min_score):
-        continue
+    # 排序
+    if sort_by == "评分↓":
+        rows.sort(key=lambda r: r["评分"], reverse=True)
+    elif sort_by == "评分↑":
+        rows.sort(key=lambda r: r["评分"])
+    elif sort_by == "收盘价↓":
+        rows.sort(key=lambda r: r["收盘"], reverse=True)
+    elif sort_by == "收盘价↑":
+        rows.sort(key=lambda r: r["收盘"])
 
-    table_rows.append({
-        "代码": code,
-        "策略": s.upper(),
-        "收盘": f"{close_val:.2f}",
-        "评分": f"{score:.1f}" if score is not None else "—",
-        "判定": verdict,
-        "点评": comment,
-        "_code": code, "_strategy": s, "_score": score or 0, "_verdict": verdict,
-    })
+    if not rows:
+        st.info("筛选条件下无候选股票。")
+        return
 
-if not table_rows:
-    st.info("当前筛选条件下无候选股票。")
-    st.stop()
+    # ── 表格 ─────────────────────────────────────────────────────────────
+    st.markdown(f"共 **{len(rows)}** 条")
 
-# 按评分降序排列
-table_rows.sort(key=lambda r: r["_score"], reverse=True)
+    df = pd.DataFrame(rows)
 
-df_table = pd.DataFrame(table_rows)
+    # 判定列色标函数
+    def _verdict_style(val):
+        if val == "PASS":
+            return "background-color:#d4f5e2;color:#1a7f37;font-weight:600"
+        elif val == "WATCH":
+            return "background-color:#fff3cd;color:#856404;font-weight:600"
+        elif val == "FAIL":
+            return "background-color:#f8d7da;color:#721c24;font-weight:600"
+        return ""
 
-# 判定列色标
-def _highlight_verdict(val):
-    colors = {"PASS": "background-color:#d4f5e2;color:#1a7f37;font-weight:600",
-              "WATCH": "background-color:#fff3cd;color:#856404;font-weight:600",
-              "FAIL": "background-color:#f8d7da;color:#721c24;font-weight:600"}
-    return colors.get(val, "")
+    styled = df.style.map(_verdict_style, subset=["判定"])
 
-styled = df_table.style.map(_highlight_verdict, subset=["判定"])
+    event = st.dataframe(
+        styled,
+        column_config={
+            "代码": st.column_config.TextColumn(width="small"),
+            "策略": st.column_config.TextColumn(width="small"),
+            "收盘": st.column_config.NumberColumn(format="%.2f", width="small"),
+            "评分": st.column_config.ProgressColumn(format="%.1f", min_value=1, max_value=5, width="medium"),
+            "判定": st.column_config.TextColumn(width="small"),
+            "点评": st.column_config.TextColumn(width="large"),
+        },
+        hide_index=True,
+        use_container_width=True,
+        height=min(38 * len(rows) + 38, 550),
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"table_{tab_key}",
+    )
 
-st.markdown(f"共 **{len(table_rows)}** 条记录")
-
-# ── Level 2: 数据表格 ──────────────────────────────────────────────────────
-
-event = st.dataframe(
-    styled,
-    column_config={
-        "代码": st.column_config.TextColumn(width="small"),
-        "策略": st.column_config.TextColumn(width="small"),
-        "收盘": st.column_config.TextColumn(width="small"),
-        "评分": st.column_config.TextColumn(width="small"),
-        "判定": st.column_config.TextColumn(width="small"),
-        "点评": st.column_config.TextColumn(width="large"),
-    },
-    hide_index=True,
-    use_container_width=True,
-    height=min(38 * len(table_rows) + 38, 500),
-    on_select="rerun",
-    selection_mode="single-row",
-)
-
-# ── Level 3: 个股详情 ──────────────────────────────────────────────────────
-
-selected_rows = event.selection.get("rows", []) if hasattr(event, "selection") else []
-selected_idx = selected_rows[0] if selected_rows else None
-
-if selected_idx is not None and selected_idx < len(table_rows):
-    row = table_rows[selected_idx]
+    # ── 个股详情 ─────────────────────────────────────────────────────────
+    sel = event.selection.get("rows", []) if hasattr(event, "selection") else []
+    if not sel:
+        return
+    idx = sel[0]
+    if idx >= len(rows):
+        return
+    row = rows[idx]
     code = row["_code"]
     strategy = row["_strategy"]
 
-    st.markdown("---")
-    st.markdown(f"### 📈 {code}  [{strategy.upper()}]")
+    st.markdown(f'<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown(f"### 📈 {code}　<span class='strategy-badge strategy-{strategy}'>{strategy.upper()}</span>", unsafe_allow_html=True)
 
-    df_raw = _load_raw(code)
-    if df_raw.empty:
-        st.warning("无日线数据")
-    else:
-        col_chart, col_review = st.columns([3, 2])
+    feats = STRATEGY_FEATURES.get(strategy, {"show_kdj": False, "show_brick": False})
+    show_kdj = feats.get("show_kdj", False)
+    show_brick = feats.get("show_brick", False)
 
-        with col_chart:
-            bars_val = st.selectbox("K线数量", [60, 120, 250, 0], index=1, key=f"bars_{code}_{strategy}",
-                                    format_func=lambda x: f"近{x}根" if x else "全部")
-            has_brick = "brick" in [s.get("strategy","") for s in filtered_cs if s.get("code")==code]
-            has_kdj = strategy in ("b1", "b2", "b3")
+    col_chart, col_review = st.columns([3, 2])
+
+    with col_chart:
+        df_raw = _load_raw(code)
+        if df_raw.empty:
+            st.warning("无日线数据")
+        else:
+            bars_val = st.selectbox(
+                "K线数量", [60, 120, 250, 0], index=1, key=f"bars_{tab_key}_{code}",
+                format_func=lambda x: f"近{x}根" if x else "全部"
+            )
+            chart_height = 560 + (130 if show_kdj else 0) + (100 if show_brick else 0)
             fig = make_daily_chart(
                 df_raw, code,
                 volume_up_color=vol_up, volume_down_color=vol_down,
-                bars=bars_val, height=720 if (has_brick or has_kdj) else 560,
-                show_brick=True, show_kdj=True,
+                bars=bars_val, height=chart_height,
+                show_brick=show_brick, show_kdj=show_kdj,
                 strategy=strategy.upper(),
             )
             st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
 
-        with col_review:
-            rm = review_map.get(code, {}).get(strategy)
-            if rm:
-                score = rm.get("total_score", "?")
-                verdict = rm.get("verdict", "")
-                color = _SCORE_COLORS.get(verdict, "#636c76")
-                st.markdown(f"**评分**：<span style='font-size:1.6rem;color:{color};font-weight:700'>{score}</span>&nbsp;{_verdict_badge(verdict)}", unsafe_allow_html=True)
-                st.caption(rm.get("summary", ""))
-                st.markdown("**点评**")
+    # ── AI 评审详情 ──────────────────────────────────────────────────────
+    with col_review:
+        rm = review_map.get(code, {}).get(strategy)
+        if not rm:
+            st.info("暂无 AI 复评结果")
+            st.caption(f"收盘价：{row['收盘']}")
+        else:
+            score = rm.get("total_score", 0)
+            verdict = rm.get("verdict", "")
+            verdict_color = SCORE_COLORS.get(verdict, "#636c76")
+
+            st.markdown(
+                f"""<div class="score-display">
+                <span class="score-number" style="color:{verdict_color}">{score:.1f}</span>
+                <span class="verdict-badge" style="background:{verdict_color}">{verdict}</span>
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            summary = rm.get("summary", "")
+            if summary:
+                st.caption(f"*{summary[:150]}*")
+
+            with st.expander("📝 完整点评", expanded=False):
                 st.markdown(rm.get("comment", "—"))
 
-                dims = rm.get("dimension_scores", rm.get("scores", {}))
-                if dims:
-                    st.markdown("**各维度评分**")
-                    for dim, info in dims.items():
-                        if isinstance(info, dict):
-                            ds = info.get("score", "?")
-                            dr = info.get("reason", "")
-                            st.caption(f"{dim}: **{ds}** {dr[:60]}")
-                        else:
-                            st.caption(f"{dim}: **{info}**")
-            else:
-                st.info("暂无 AI 复评结果")
-                st.caption(f"收盘价：{row['收盘']}")
+            dims = rm.get("dimension_scores", {})
+            if dims:
+                st.markdown("**各维度评分**")
+                for dim, info in dims.items():
+                    if isinstance(info, dict):
+                        ds = float(info.get("score", 0))
+                        dr = info.get("reason", "")[:80]
+                    else:
+                        ds = float(info)
+                        dr = ""
+                    bar_color = "#dc3545" if ds < 2 else ("#ffc107" if ds < 3 else "#28a745")
+                    pct = max(ds / 5.0 * 100, 2)
+                    st.markdown(
+                        f"""<div style="margin:4px 0">
+                        <div style="display:flex;justify-content:space-between;font-size:0.82rem">
+                        <span>{dim}</span><span style="color:{bar_color};font-weight:600">{ds:.0f}</span></div>
+                        <div style="background:#e9ecef;border-radius:4px;height:6px">
+                        <div style="background:{bar_color};width:{pct}%;height:6px;border-radius:4px"></div></div>
+                        <div style="font-size:0.74rem;color:#636c76">{dr}</div></div>""",
+                        unsafe_allow_html=True
+                    )
 
-            # 策略候选信息
-            cand = next((c for c in filtered_cs if c.get("code")==code and c.get("strategy")==strategy), None)
-            if cand:
-                extra = cand.get("extra", {})
-                if extra.get("brick_growth"):
-                    st.caption(f"砖型增长：{extra['brick_growth']:.2f}x")
+        # 回测按钮
+        st.markdown("")
+        render_backtest_button(code, strategy, pick_date, key=f"bt_{tab_key}_{code}")
+
+        # 候选信息
+        cand = next((c for c in candidates if c.get("code")==code and c.get("strategy")==strategy), None)
+        if cand:
+            extra = cand.get("extra", {})
+            if extra.get("brick_growth"):
+                st.caption(f"砖型增长：{extra['brick_growth']:.2f}x")
+
+
+# ── 主入口：动态标签页 ─────────────────────────────────────────────────────
+
+strategies_in_data = sorted(set(c.get("strategy", "") for c in candidates))
+tab_names = ["📋 总览"] + [f"{STRATEGY_LABELS.get(s, s.upper())}" for s in strategies_in_data]
+tabs = st.tabs(tab_names)
+
+for i, tab in enumerate(tabs):
+    with tab:
+        if i == 0:
+            _render_strategy_tab(None)
+        else:
+            _render_strategy_tab(strategies_in_data[i - 1])
