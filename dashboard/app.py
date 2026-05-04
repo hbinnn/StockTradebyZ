@@ -117,6 +117,17 @@ def _load_review_map(pick_date: str) -> dict[str, dict[str, dict]]:
     return result
 
 
+@st.cache_data(ttl=30)
+def _load_pattern_matches(pick_date: str) -> dict[str, list[dict]]:
+    """加载完美图形匹配结果，返回 {code: [match, ...]}。"""
+    p = _ROOT / "data" / "pattern_matched" / f"matched_{pick_date}.json"
+    if not p.exists():
+        return {}
+    with open(p, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("results", {})
+
+
 @st.cache_data(show_spinner=False)
 def _load_raw(code: str) -> pd.DataFrame:
     cfg = _load_cfg()
@@ -171,6 +182,7 @@ if not pick_date and candidates:
 
 review_map = _load_review_map(pick_date) if pick_date else {}
 suggestion = _load_suggestion(pick_date) if pick_date else None
+pattern_matches = _load_pattern_matches(pick_date) if pick_date else {}
 
 if not candidates:
     st.info("暂无候选股票，请先运行量化初选。")
@@ -284,7 +296,8 @@ def _render_strategy_tab(strategy_name: str | None):
     st.markdown(f"共 **{len(rows)}** 条　｜　☑️ 勾选左侧复选框查看个股详情")
     st.markdown("")
 
-    df = pd.DataFrame(rows)
+    display_cols = ["代码", "策略", "收盘", "评分", "判定", "点评"]
+    df = pd.DataFrame(rows)[display_cols]
 
     def _verdict_style(val):
         if val == "PASS": return "background-color:#d4f5e2;color:#1a7f37;font-weight:600"
@@ -304,6 +317,7 @@ def _render_strategy_tab(strategy_name: str | None):
             "判定": st.column_config.TextColumn(width="small"),
             "点评": st.column_config.TextColumn(width="large"),
         },
+        column_order=display_cols,
         hide_index=True,
         use_container_width=True,
         height=min(38 * len(rows) + 38, 420),
@@ -408,6 +422,29 @@ def _render_strategy_tab(strategy_name: str | None):
             extra = cand.get("extra", {})
             if extra.get("brick_growth"):
                 st.caption(f"砖型增长：{extra['brick_growth']:.2f}x")
+
+        # 图形匹配
+        matches = pattern_matches.get(code, [])
+        if matches:
+            good = [m for m in matches if m.get("similarity", 0) >= 0.7]
+            if good:
+                st.markdown("---")
+                st.markdown("**🔗 图形匹配**")
+                for m in sorted(good, key=lambda x: x.get("similarity", 0), reverse=True)[:3]:
+                    sim = m.get("similarity", 0)
+                    bar_pct = int(sim * 100)
+                    bar_c = "#28a745" if sim >= 0.8 else "#ffc107"
+                    st.markdown(
+                        f"""<div style="margin:4px 0;font-size:0.82rem">
+                        <span style="font-weight:600">{m.get('case_code','')}</span>
+                        <span style="color:#636c76"> {m.get('case_date','')}</span>
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+                        <div style="flex:1;background:#e9ecef;border-radius:3px;height:4px;max-width:100px">
+                        <div style="background:{bar_c};width:{bar_pct}%;height:4px;border-radius:3px"></div></div>
+                        <span style="color:{bar_c};font-weight:600">{sim:.2f}</span></div>
+                        <div style="color:#636c76;font-size:0.76rem">{m.get('case_description','')[:60]}</div></div>""",
+                        unsafe_allow_html=True
+                    )
 
 
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
