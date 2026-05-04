@@ -432,25 +432,47 @@ def _render_strategy_tab(strategy_name: str | None):
         # 图形匹配
         matches = pattern_matches.get(code, [])
         if matches:
-            good = [m for m in matches if m.get("similarity", 0) >= 0.7]
+            good = sorted(
+                [m for m in matches if m.get("similarity", 0) >= 0.7],
+                key=lambda x: x.get("similarity", 0), reverse=True
+            )[:3]
             if good:
                 st.markdown("---")
                 st.markdown("**🔗 图形匹配**")
-                for m in sorted(good, key=lambda x: x.get("similarity", 0), reverse=True)[:3]:
+                for m in good:
                     sim = m.get("similarity", 0)
-                    bar_pct = int(sim * 100)
                     bar_c = "#28a745" if sim >= 0.8 else "#ffc107"
+                    case_code = m.get("case_code", "")
+                    case_date = m.get("case_date", "")
+                    desc = m.get("case_description", "")
                     st.markdown(
-                        f"""<div style="margin:4px 0;font-size:0.82rem">
-                        <span style="font-weight:600">{m.get('case_code','')}</span>
-                        <span style="color:#636c76"> {m.get('case_date','')}</span>
-                        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
-                        <div style="flex:1;background:#e9ecef;border-radius:3px;height:4px;max-width:100px">
-                        <div style="background:{bar_c};width:{bar_pct}%;height:4px;border-radius:3px"></div></div>
-                        <span style="color:{bar_c};font-weight:600">{sim:.2f}</span></div>
-                        <div style="color:#636c76;font-size:0.76rem">{m.get('case_description','')[:60]}</div></div>""",
+                        f"""<span style="font-weight:600;font-size:0.9rem">{case_code}</span>
+                        <span style="color:#636c76;font-size:0.82rem"> {case_date}</span>
+                        <span style="color:{bar_c};font-weight:600;font-size:0.85rem;float:right">相似度 {sim:.2f}</span>
+                        <div style="color:#636c76;font-size:0.78rem;margin-bottom:4px">{desc[:80]}</div>""",
                         unsafe_allow_html=True
                     )
+                    # 加载案例走势图
+                    case_df = _load_raw(case_code)
+                    if not case_df.empty:
+                        case_df["date"] = pd.to_datetime(case_df["date"])
+                        try:
+                            case_ts = pd.Timestamp(case_date)
+                            # 取 case_date 及之前的 ~60 根 K 线
+                            hist = case_df[case_df["date"] <= case_ts].tail(60)
+                            if len(hist) >= 10:
+                                fig = make_daily_chart(
+                                    hist, case_code,
+                                    bars=0, height=300,
+                                    show_brick=False, show_kdj=False,
+                                )
+                                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                            else:
+                                st.caption(f"（{case_code} 数据不足）")
+                        except Exception:
+                            st.caption(f"（{case_code} 图表生成失败）")
+                    else:
+                        st.caption(f"（{case_code} 无日线数据）")
 
 
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
