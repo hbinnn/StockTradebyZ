@@ -662,8 +662,7 @@ def _render_pattern_library():
                             "description": add_desc.strip(),
                         })
                         _save_pattern_yaml(full_yaml)
-                        st.success(f"✅ 已保存！{code_clean} @ {add_date.strip()} → {add_strat}")
-                        st.caption("切换到「浏览案例」标签页查看")
+                        st.toast(f"✅ 已保存！{code_clean} @ {add_date.strip()} → {add_strat}", icon="✅")
 
 
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
