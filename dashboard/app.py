@@ -297,7 +297,7 @@ def _render_strategy_tab(strategy_name: str | None):
 
     styled = df.style.map(_verdict_style, subset=["判定"])
 
-    event = st.dataframe(
+    st.dataframe(
         styled,
         column_config={
             "代码": st.column_config.TextColumn(width="small"),
@@ -309,18 +309,27 @@ def _render_strategy_tab(strategy_name: str | None):
         },
         hide_index=True,
         use_container_width=True,
-        height=min(38 * len(rows) + 38, 550),
-        on_select="rerun",
-        selection_mode="single-row",
-        key=f"table_{tab_key}",
+        height=min(38 * len(rows) + 38, 400),
+        key=f"table_display_{tab_key}",
     )
 
-    # ── 个股详情 ─────────────────────────────────────────────────────────
-    sel = event.selection.get("rows", []) if hasattr(event, "selection") else []
-    if not sel:
+    # ── 个股选择（下拉框替代复选框）──────────────────────────────────────
+    st.markdown("")
+    select_options = ["— 选择股票查看详情 —"] + [
+        f"{r['代码']}  [{r['策略']}]  评分:{r['评分']:.1f}  {r['判定']}  {r['点评'][:30]}"
+        for r in rows
+    ]
+    selected_label = st.selectbox(
+        "选择股票查看详情", select_options,
+        key=f"detail_select_{tab_key}",
+        label_visibility="collapsed",
+        placeholder="点击这里选择一只股票查看详情...",
+    )
+
+    if not selected_label or selected_label.startswith("—"):
         return
-    idx = sel[0]
-    if idx >= len(rows):
+    idx = select_options.index(selected_label) - 1
+    if idx < 0 or idx >= len(rows):
         return
     row = rows[idx]
     code = row["_code"]
