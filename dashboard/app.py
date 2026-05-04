@@ -128,6 +128,25 @@ def _load_pattern_matches(pick_date: str) -> dict[str, list[dict]]:
     return data.get("results", {})
 
 
+def _load_pattern_yaml() -> dict:
+    """加载完美图形案例 YAML（不缓存，确保写入后立即更新）。"""
+    p = _ROOT / "config" / "perfect_patterns.yaml"
+    if not p.exists():
+        return {}
+    with open(p, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _save_pattern_yaml(data: dict) -> None:
+    """原子写入完美图形案例 YAML。"""
+    import os
+    p = _ROOT / "config" / "perfect_patterns.yaml"
+    tmp = p.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    os.replace(tmp, p)
+
+
 @st.cache_data(show_spinner=False)
 def _load_raw(code: str) -> pd.DataFrame:
     cfg = _load_cfg()
@@ -475,15 +494,129 @@ def _render_strategy_tab(strategy_name: str | None):
                         st.caption(f"（{case_code} 无日线数据）")
 
 
+# ── 可复用：图形案例库标签页 ──────────────────────────────────────────────
+
+def _render_pattern_library():
+    """渲染完美图形案例库：浏览 + 添加。"""
+    st.markdown("## 📐 完美图形案例库")
+    st.caption("管理各策略的历史完美图形案例，用于图形相似度匹配")
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    pat_data = _load_pattern_yaml()
+    strategies_pat = pat_data.get("strategies", {}) if "strategies" in pat_data else pat_data
+    all_pat_strategies = [s for s in strategies_pat if isinstance(strategies_pat.get(s), list)]
+
+    sub_tabs = st.tabs(["📋 浏览案例", "➕ 添加案例"])
+
+    # ── 子页 1: 浏览案例 ──────────────────────────────────────────────────
+    with sub_tabs[0]:
+        if not all_pat_strategies:
+            st.info("暂无案例，请先添加。")
+        else:
+            view_strat = st.selectbox("策略", all_pat_strategies, key="pat_view_strat",
+                                       format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
+            cases = strategies_pat.get(view_strat, [])
+            if not cases:
+                st.info(f"策略 {view_strat.upper()} 下暂无案例。")
+            else:
+                st.markdown(f"共 **{len(cases)}** 个案例")
+                for idx, case in enumerate(cases):
+                    code = case.get("code", "")
+                    pdate = case.get("perfect_date", "")
+                    desc = case.get("description", "")
+                    with st.container():
+                        st.markdown(f"#### {code} · {pdate}")
+                        st.caption(desc)
+                        case_df = _load_raw(code)
+                        if not case_df.empty:
+                            case_df["date"] = pd.to_datetime(case_df["date"])
+                            try:
+                                pts = pd.Timestamp(pdate)
+                                full = case_df[case_df["date"] <= pts]
+                                if len(full) >= 10:
+                                    fig = make_daily_chart(full, code, bars=60, height=350,
+                                                           show_brick=False, show_kdj=True)
+                                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                            except Exception:
+                                st.caption("（图表生成失败）")
+                        else:
+                            st.caption("（无日线数据）")
+                        if idx < len(cases) - 1:
+                            st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── 子页 2: 添加案例 ──────────────────────────────────────────────────
+    with sub_tabs[1]:
+        st.markdown("### 添加新案例")
+        col1, col2 = st.columns(2)
+        with col1:
+            add_strat = st.selectbox("策略", all_pat_strategies or ["b1", "brick", "b2", "b3"],
+                                      key="pat_add_strat",
+                                      format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
+            add_code = st.text_input("股票代码（6位）", max_chars=6, key="pat_add_code",
+                                      placeholder="例：600519")
+        with col2:
+            add_date = st.text_input("完美图形日期", key="pat_add_date",
+                                      placeholder="YYYY-MM-DD  例：2026-04-30")
+        add_desc = st.text_area("案例描述", key="pat_add_desc",
+                                 placeholder="描述该完美图形的特征，如：放量上涨缩量回调，白线在黄线上，股价在白黄线之间")
+
+        col_prev, col_save = st.columns([1, 3])
+        with col_prev:
+            preview = st.button("🔍 预览 K 线", key="pat_preview", use_container_width=True)
+        if preview and add_code and add_date:
+            df = _load_raw(add_code.strip().zfill(6))
+            if not df.empty:
+                df["date"] = pd.to_datetime(df["date"])
+                try:
+                    pts = pd.Timestamp(add_date.strip())
+                    full = df[df["date"] <= pts]
+                    if len(full) >= 10:
+                        fig = make_daily_chart(full, add_code.strip().zfill(6), bars=60, height=380,
+                                               show_brick=False, show_kdj=True)
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                    else:
+                        st.warning("该日期前数据不足（需至少 10 根 K 线）")
+                except Exception as e:
+                    st.error(f"日期格式错误：{e}")
+            else:
+                st.warning(f"未找到 {add_code} 的日线数据")
+        with col_save:
+            if st.button("💾 保存案例", key="pat_save", type="primary", use_container_width=True):
+                if not add_code or not add_date or not add_desc:
+                    st.error("请填写所有字段（代码、日期、描述）")
+                else:
+                    code_clean = add_code.strip().zfill(6)
+                    # 检查代码数据存在
+                    df_check = _load_raw(code_clean)
+                    if df_check.empty:
+                        st.error(f"未找到 {code_clean} 的日线数据，请确认代码正确")
+                    else:
+                        # 加载原始 YAML，追加后保存
+                        full_yaml = _load_pattern_yaml()
+                        if "strategies" not in full_yaml:
+                            full_yaml = {"strategies": {s: [] for s in all_pat_strategies}}
+                        full_yaml.setdefault("strategies", {}).setdefault(add_strat, [])
+                        full_yaml["strategies"][add_strat].append({
+                            "code": code_clean,
+                            "perfect_date": add_date.strip(),
+                            "description": add_desc.strip(),
+                        })
+                        _save_pattern_yaml(full_yaml)
+                        st.success(f"✅ 已保存！{code_clean} @ {add_date.strip()} → {add_strat}")
+                        st.caption("切换到「浏览案例」标签页查看")
+
+
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
 
 strategies_in_data = sorted(set(c.get("strategy", "") for c in candidates))
 tab_names = ["📋 总览"] + [f"{STRATEGY_LABELS.get(s, s.upper())}" for s in strategies_in_data]
-tabs = st.tabs(tab_names)
+tabs = st.tabs(tab_names + ["📐 图形案例库"])
 
 for i, tab in enumerate(tabs):
     with tab:
         if i == 0:
             _render_strategy_tab(None)
-        else:
+        elif i < len(tab_names):
             _render_strategy_tab(strategies_in_data[i - 1])
+        else:
+            _render_pattern_library()
