@@ -535,7 +535,7 @@ def _render_pattern_library():
         if not all_pat_strategies:
             st.info("暂无案例，请先添加。")
         else:
-            view_strat = st.selectbox("策略", all_pat_strategies, key="pat_view_strat",
+            view_strat = st.selectbox("策略", ["b1", "brick", "b2", "b3"], key="pat_view_strat",
                                        format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
             cases = strategies_pat.get(view_strat, [])
             if not cases:
