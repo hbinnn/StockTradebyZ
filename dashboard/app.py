@@ -579,6 +579,16 @@ def _render_pattern_library():
                     name_lbl = f" · {stock_names.get(code, '')}" if stock_names.get(code) else ""
                     st.markdown(f"### {code}{name_lbl} · {pdate}")
                     st.caption(desc)
+
+                    # 删除按钮
+                    if st.button("🗑️ 删除此案例", key=f"pat_del_{sel[0]}"):
+                        full_yaml = _load_pattern_yaml()
+                        full_yaml.setdefault("strategies", {}).setdefault(view_strat, [])
+                        del full_yaml["strategies"][view_strat][sel[0]]
+                        _save_pattern_yaml(full_yaml)
+                        st.success("已删除，刷新页面生效")
+                        st.rerun()
+
                     case_df = _load_raw(code)
                     if not case_df.empty:
                         case_df["date"] = pd.to_datetime(case_df["date"])
@@ -659,14 +669,22 @@ def _render_pattern_library():
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
 
 strategies_in_data = sorted(set(c.get("strategy", "") for c in candidates))
-tab_names = ["📋 总览"] + [f"{STRATEGY_LABELS.get(s, s.upper())}" for s in strategies_in_data]
-tabs = st.tabs(tab_names + ["📐 图形案例库"])
+tab_names = ["📋 总览"] + [f"{STRATEGY_LABELS.get(s, s.upper())}" for s in strategies_in_data] + ["📐 图形案例库"]
 
-for i, tab in enumerate(tabs):
-    with tab:
-        if i == 0:
-            _render_strategy_tab(None)
-        elif i < len(tab_names):
-            _render_strategy_tab(strategies_in_data[i - 1])
-        else:
-            _render_pattern_library()
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = 0
+
+active_tab = st.radio(
+    "导航", tab_names, index=st.session_state["active_tab"],
+    horizontal=True, label_visibility="collapsed",
+    key="nav_radio"
+)
+st.session_state["active_tab"] = tab_names.index(active_tab)
+idx = st.session_state["active_tab"]
+
+if idx == 0:
+    _render_strategy_tab(None)
+elif idx < len(tab_names) - 1:
+    _render_strategy_tab(strategies_in_data[idx - 1])
+else:
+    _render_pattern_library()
