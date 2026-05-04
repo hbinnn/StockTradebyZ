@@ -196,78 +196,84 @@ def export_eastmoney_format(recommendations: list[dict], output_path: Path,
 def main():
     parser = argparse.ArgumentParser(description="导出东方财富可导入的股票文件")
     parser.add_argument(
-        "--review-dir",
-        type=Path,
-        default=DEFAULT_SUGGESTION,
+        "--review-dir", type=Path, default=DEFAULT_SUGGESTION,
         help="评审结果目录（默认 data/review）"
     )
     parser.add_argument(
-        "--candidates",
-        type=Path,
-        default=DEFAULT_CANDIDATES,
+        "--candidates", type=Path, default=DEFAULT_CANDIDATES,
         help="候选股票文件（默认 data/candidates/candidates_latest.json）"
     )
     parser.add_argument(
-        "--format",
-        choices=["plain", "csv", "eastmoney"],
-        default="eastmoney",
+        "--format", choices=["plain", "csv", "eastmoney"], default="eastmoney",
         help="导出格式：plain=纯代码, csv=带名称, eastmoney=带后缀（默认 eastmoney）"
     )
     parser.add_argument(
-        "--min-score",
-        type=float,
-        default=4.0,
+        "--min-score", type=float, default=4.0,
         help="最低评分门槛（默认 4.0）"
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
+        "--output", type=Path, default=None,
         help="输出文件路径（默认自动生成）"
     )
     parser.add_argument(
-        "--no-ai",
-        action="store_true",
+        "--no-ai", action="store_true",
         help="无 AI 复评模式，直接从候选股票导出（不使用评分门槛）"
     )
     args = parser.parse_args()
 
-    # 加载数据
     names = load_stock_names(args.candidates)
+    eastmoney_dir = _ROOT / "data" / "eastmoney"
+    eastmoney_dir.mkdir(parents=True, exist_ok=True)
 
     if args.no_ai:
-        # 无 AI 复评模式：直接从候选股票导出
-        recommendations, pick_date, strategy_name = load_candidates_directly(args.candidates)
+        recommendations, pick_date, _ = load_candidates_directly(args.candidates)
         print(f"[INFO] 模式：无 AI 复评，直接导出候选股票")
     else:
-        # 有 AI 复评模式：从复评结果加载
         recommendations, pick_date, _ = load_suggestion(args.review_dir)
-        strategy_name = load_strategies(args.candidates)
+        # 从候选文件补充 strategy 字段
+        if args.candidates.exists():
+            with open(args.candidates, encoding="utf-8") as f:
+                cand_data = json.load(f)
+            code_strat = {}
+            for c in cand_data.get("candidates", []):
+                code_strat[c["code"]] = c.get("strategy", "b1")
+            for r in recommendations:
+                if "strategy" not in r:
+                    r["strategy"] = code_strat.get(r.get("code", ""), "b1")
         print(f"[INFO] 模式：基于 AI 复评结果")
 
     print(f"[INFO] 选股日期：{pick_date}")
-    print(f"[INFO] 策略：{strategy_name}")
     print(f"[INFO] 评分≥{args.min_score} 的股票：{len([r for r in recommendations if r.get('total_score', 0) >= args.min_score])} 只")
 
-    # 生成输出路径
-    if args.output:
-        output_path = args.output
-    else:
-        eastmoney_dir = _ROOT / "data" / "eastmoney"
-        eastmoney_dir.mkdir(parents=True, exist_ok=True)
-        output_path = eastmoney_dir / f"eastmoney_{strategy_name}_{pick_date}.txt"
-        if args.format == "csv":
-            output_path = output_path.with_suffix(".csv")
+    # 按策略分组
+    by_strategy: dict[str, list[dict]] = {}
+    for r in recommendations:
+        if r.get("total_score", 0) < args.min_score:
+            continue
+        s = r.get("strategy", "b1")
+        by_strategy.setdefault(s, []).append(r)
 
-    # 导出
-    if args.format == "plain":
-        export_plain_text(recommendations, output_path, args.min_score)
-    elif args.format == "csv":
-        export_csv_with_name(recommendations, output_path, args.min_score, names)
-    else:
-        export_eastmoney_format(recommendations, output_path, args.min_score, names)
+    if not by_strategy:
+        print("[INFO] 无达标股票，跳过导出。")
+        return
 
-    print(f"\n📁 文件位置：{output_path}")
+    # 每个策略单独导出
+    for strat, recs in sorted(by_strategy.items()):
+        if args.output:
+            output_path = args.output
+        else:
+            output_path = eastmoney_dir / f"eastmoney_{strat}_{pick_date}.txt"
+            if args.format == "csv":
+                output_path = output_path.with_suffix(".csv")
+
+        if args.format == "plain":
+            export_plain_text(recs, output_path, args.min_score)
+        elif args.format == "csv":
+            export_csv_with_name(recs, output_path, args.min_score, names)
+        else:
+            export_eastmoney_format(recs, output_path, args.min_score, names)
+
+    print(f"\n📁 文件位置：{eastmoney_dir}")
     print("💡 导入东方财富方法：自选股 → 右键 → 导入自选股 → 选择文件")
 
 
