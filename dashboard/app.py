@@ -519,30 +519,55 @@ def _render_pattern_library():
             if not cases:
                 st.info(f"策略 {view_strat.upper()} 下暂无案例。")
             else:
-                st.markdown(f"共 **{len(cases)}** 个案例")
+                st.markdown(f"共 **{len(cases)}** 个案例　｜　☑️ 勾选查看走势图")
+
+                # 构建表格
+                table_rows = []
                 for idx, case in enumerate(cases):
+                    table_rows.append({
+                        "代码": case.get("code", ""),
+                        "日期": case.get("perfect_date", ""),
+                        "描述": case.get("description", ""),
+                        "_idx": idx,
+                    })
+                df = pd.DataFrame(table_rows)
+                event = st.dataframe(
+                    df,
+                    column_config={
+                        "代码": st.column_config.TextColumn(width="small"),
+                        "日期": st.column_config.TextColumn(width="small"),
+                        "描述": st.column_config.TextColumn(width="large"),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    height=min(38 * len(cases) + 38, 400),
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="pat_case_table",
+                )
+                sel = event.selection.get("rows", []) if hasattr(event, "selection") else []
+                if sel and sel[0] < len(cases):
+                    case = cases[sel[0]]
                     code = case.get("code", "")
                     pdate = case.get("perfect_date", "")
                     desc = case.get("description", "")
-                    with st.container():
-                        st.markdown(f"#### {code} · {pdate}")
-                        st.caption(desc)
-                        case_df = _load_raw(code)
-                        if not case_df.empty:
-                            case_df["date"] = pd.to_datetime(case_df["date"])
-                            try:
-                                pts = pd.Timestamp(pdate)
-                                full = case_df[case_df["date"] <= pts]
-                                if len(full) >= 10:
-                                    fig = make_daily_chart(full, code, bars=60, height=350,
-                                                           show_brick=False, show_kdj=True)
-                                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-                            except Exception:
-                                st.caption("（图表生成失败）")
-                        else:
-                            st.caption("（无日线数据）")
-                        if idx < len(cases) - 1:
-                            st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+                    st.markdown(f'<hr class="section-divider">', unsafe_allow_html=True)
+                    st.markdown(f"### {code} · {pdate}")
+                    st.caption(desc)
+                    case_df = _load_raw(code)
+                    if not case_df.empty:
+                        case_df["date"] = pd.to_datetime(case_df["date"])
+                        try:
+                            pts = pd.Timestamp(pdate)
+                            full = case_df[case_df["date"] <= pts]
+                            if len(full) >= 10:
+                                fig = make_daily_chart(full, code, bars=120, height=500,
+                                                       show_brick=False, show_kdj=True)
+                                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                        except Exception:
+                            st.caption("（图表生成失败）")
+                    else:
+                        st.caption("（无日线数据）")
 
     # ── 子页 2: 添加案例 ──────────────────────────────────────────────────
     with sub_tabs[1]:
