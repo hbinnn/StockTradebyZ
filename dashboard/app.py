@@ -452,18 +452,18 @@ def _render_strategy_tab(strategy_name: str | None):
                         <div style="color:#636c76;font-size:0.78rem;margin-bottom:4px">{desc[:80]}</div>""",
                         unsafe_allow_html=True
                     )
-                    # 加载案例走势图
+                    # 加载案例走势图（全量数据计算均线，再截断60根展示）
                     case_df = _load_raw(case_code)
                     if not case_df.empty:
                         case_df["date"] = pd.to_datetime(case_df["date"])
                         try:
                             case_ts = pd.Timestamp(case_date)
-                            # 取 case_date 及之前的 ~60 根 K 线
-                            hist = case_df[case_df["date"] <= case_ts].tail(60)
-                            if len(hist) >= 10:
+                            # 传全量数据给 make_daily_chart，它内部先算均线再 tail
+                            full = case_df[case_df["date"] <= case_ts]
+                            if len(full) >= 10:
                                 fig = make_daily_chart(
-                                    hist, case_code,
-                                    bars=0, height=300,
+                                    full, case_code,
+                                    bars=60, height=300,
                                     show_brick=False, show_kdj=False,
                                 )
                                 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
