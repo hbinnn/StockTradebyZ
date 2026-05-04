@@ -671,16 +671,12 @@ def _render_pattern_library():
 strategies_in_data = sorted(set(c.get("strategy", "") for c in candidates))
 tab_names = ["📋 总览"] + [f"{STRATEGY_LABELS.get(s, s.upper())}" for s in strategies_in_data] + ["📐 图形案例库"]
 
-if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = 0
-
 active_tab = st.radio(
-    "导航", tab_names, index=st.session_state["active_tab"],
+    "导航", tab_names, index=0,
     horizontal=True, label_visibility="collapsed",
     key="nav_radio"
 )
-st.session_state["active_tab"] = tab_names.index(active_tab)
-idx = st.session_state["active_tab"]
+idx = tab_names.index(active_tab)
 
 if idx == 0:
     _render_strategy_tab(None)
