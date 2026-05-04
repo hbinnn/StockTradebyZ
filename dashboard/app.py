@@ -609,7 +609,7 @@ def _render_pattern_library():
         st.markdown("### 添加新案例")
         col1, col2 = st.columns(2)
         with col1:
-            add_strat = st.selectbox("策略", all_pat_strategies or ["b1", "brick", "b2", "b3"],
+            add_strat = st.selectbox("策略", ["b1", "brick", "b2", "b3"],
                                       key="pat_add_strat",
                                       format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
             add_code = st.text_input("股票代码（6位）", max_chars=6, key="pat_add_code",
@@ -654,7 +654,7 @@ def _render_pattern_library():
                         # 加载原始 YAML，追加后保存
                         full_yaml = _load_pattern_yaml()
                         if "strategies" not in full_yaml:
-                            full_yaml = {"strategies": {s: [] for s in all_pat_strategies}}
+                            full_yaml = {"strategies": {s: [] for s in ["b1", "brick", "b2", "b3"]}}
                         full_yaml.setdefault("strategies", {}).setdefault(add_strat, [])
                         full_yaml["strategies"][add_strat].append({
                             "code": code_clean,
