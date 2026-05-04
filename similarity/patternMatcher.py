@@ -295,23 +295,25 @@ def load_perfect_patterns(
     config_path: Path = _DEFAULT_CONFIG,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    加载完美图形案例配置。
+    加载所有策略的完美图形案例（从 strategies/*/patterns.yaml 读取）。
 
     Returns:
         字典，key为策略名，value为案例列表
-        [{
-            "code": "600026",
-            "perfect_date": "2025-03-15",
-            "description": "底部放量突破"
-        }, ...]
     """
-    if not config_path.exists():
-        raise FileNotFoundError(f"找不到配置文件：{config_path}")
-
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    strategies = config.get("strategies", {})
+    strategies: Dict[str, List[Dict[str, Any]]] = {}
+    strat_dir = _ROOT / "strategies"
+    if not strat_dir.exists():
+        return strategies
+    for d in sorted(strat_dir.iterdir()):
+        if not d.is_dir() or d.name.startswith("_"):
+            continue
+        p = d / "patterns.yaml"
+        if not p.exists():
+            continue
+        with open(p, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        cases = data.get("cases", [])
+        strategies[d.name] = cases
     return strategies
 
 

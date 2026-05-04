@@ -128,22 +128,24 @@ def _load_pattern_matches(pick_date: str) -> dict[str, list[dict]]:
     return data.get("results", {})
 
 
-def _load_pattern_yaml() -> dict:
-    """加载完美图形案例 YAML（不缓存，确保写入后立即更新）。"""
-    p = _ROOT / "config" / "perfect_patterns.yaml"
+def _load_pattern_cases(strategy: str) -> list[dict]:
+    """加载某策略的完美图形案例列表。"""
+    p = _ROOT / "strategies" / strategy / "patterns.yaml"
     if not p.exists():
-        return {}
+        return []
     with open(p, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        data = yaml.safe_load(f) or {}
+    return data.get("cases", [])
 
 
-def _save_pattern_yaml(data: dict) -> None:
-    """原子写入完美图形案例 YAML。"""
+def _save_pattern_cases(strategy: str, cases: list[dict]) -> None:
+    """原子写入某策略的完美图形案例。"""
     import os
-    p = _ROOT / "config" / "perfect_patterns.yaml"
+    p = _ROOT / "strategies" / strategy / "patterns.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        yaml.dump({"cases": cases}, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
     os.replace(tmp, p)
 
 
@@ -524,9 +526,7 @@ def _render_pattern_library():
     st.caption("管理各策略的历史完美图形案例，用于图形相似度匹配")
     st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 
-    pat_data = _load_pattern_yaml()
-    strategies_pat = pat_data.get("strategies", {}) if "strategies" in pat_data else pat_data
-    all_pat_strategies = [s for s in strategies_pat if isinstance(strategies_pat.get(s), list)]
+    all_pat_strategies = ["b1", "brick", "b2", "b3"]
 
     sub_choice = st.radio(
         "子导航", ["📋 浏览案例", "➕ 添加案例"],
@@ -542,7 +542,7 @@ def _render_pattern_library():
         else:
             view_strat = st.selectbox("策略", ["b1", "brick", "b2", "b3"], key="pat_view_strat",
                                        format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
-            cases = strategies_pat.get(view_strat, [])
+            cases = _load_pattern_cases(view_strat)
             if not cases:
                 st.info(f"策略 {view_strat.upper()} 下暂无案例。")
             else:
@@ -587,12 +587,9 @@ def _render_pattern_library():
 
                     # 删除按钮
                     if st.button("🗑️ 删除此案例", key=f"pat_del_{sel[0]}"):
-                        full_yaml = _load_pattern_yaml()
-                        strategies = full_yaml.setdefault("strategies", {})
-                        if isinstance(strategies.get(view_strat), list):
-                            del strategies[view_strat][sel[0]]
-                        _save_pattern_yaml(full_yaml)
-                        st.success("已删除，刷新页面生效")
+                        cases.pop(sel[0])
+                        _save_pattern_cases(view_strat, cases)
+                        st.toast("已删除", icon="🗑️")
                         st.rerun()
 
                     case_df = _load_raw(code)
@@ -639,18 +636,13 @@ def _render_pattern_library():
                 if df_check.empty:
                     st.error(f"未找到 {code_clean} 的日线数据，请确认代码正确")
                 else:
-                    full_yaml = _load_pattern_yaml()
-                    if "strategies" not in full_yaml:
-                        full_yaml = {"strategies": {s: [] for s in ["b1", "brick", "b2", "b3"]}}
-                    strategies = full_yaml.setdefault("strategies", {})
-                    if not isinstance(strategies.get(form_strat), list):
-                        strategies[form_strat] = []
-                    strategies[form_strat].append({
+                    cases = _load_pattern_cases(form_strat)
+                    cases.append({
                         "code": code_clean,
                         "perfect_date": form_date.strip(),
                         "description": form_desc.strip(),
                     })
-                    _save_pattern_yaml(full_yaml)
+                    _save_pattern_cases(form_strat, cases)
                     st.toast(f"✅ 已保存！{code_clean} @ {form_date.strip()} → {form_strat}", icon="✅")
 
 
