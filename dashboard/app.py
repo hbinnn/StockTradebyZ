@@ -528,10 +528,15 @@ def _render_pattern_library():
     strategies_pat = pat_data.get("strategies", {}) if "strategies" in pat_data else pat_data
     all_pat_strategies = [s for s in strategies_pat if isinstance(strategies_pat.get(s), list)]
 
-    sub_tabs = st.tabs(["📋 浏览案例", "➕ 添加案例"])
+    sub_choice = st.radio(
+        "子导航", ["📋 浏览案例", "➕ 添加案例"],
+        index=0, horizontal=True,
+        label_visibility="collapsed", key="pat_sub_radio"
+    )
+    is_browse = sub_choice.startswith("📋")
 
-    # ── 子页 1: 浏览案例 ──────────────────────────────────────────────────
-    with sub_tabs[0]:
+    # ── 浏览案例 ──────────────────────────────────────────────────────────
+    if is_browse:
         if not all_pat_strategies:
             st.info("暂无案例，请先添加。")
         else:
@@ -604,8 +609,8 @@ def _render_pattern_library():
                     else:
                         st.caption("（无日线数据）")
 
-    # ── 子页 2: 添加案例 ──────────────────────────────────────────────────
-    with sub_tabs[1]:
+    # ── 添加案例 ──────────────────────────────────────────────────────────
+    else:
         st.markdown("### 添加新案例")
         col1, col2 = st.columns(2)
         with col1:
