@@ -613,64 +613,45 @@ def _render_pattern_library():
     # ── 添加案例 ──────────────────────────────────────────────────────────
     else:
         st.markdown("### 添加新案例")
-        col1, col2 = st.columns(2)
-        with col1:
-            add_strat = st.selectbox("策略", ["b1", "brick", "b2", "b3"],
-                                      key="pat_add_strat",
-                                      format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
-            add_code = st.text_input("股票代码（6位）", max_chars=6, key="pat_add_code",
-                                      placeholder="例：600519")
-        with col2:
-            add_date = st.text_input("完美图形日期", key="pat_add_date",
-                                      placeholder="YYYY-MM-DD  例：2026-04-30")
-        add_desc = st.text_area("案例描述", key="pat_add_desc",
-                                 placeholder="描述该完美图形的特征，如：放量上涨缩量回调，白线在黄线上，股价在白黄线之间")
 
-        col_prev, col_save = st.columns([1, 3])
-        with col_prev:
-            preview = st.button("🔍 预览 K 线", key="pat_preview", use_container_width=True)
-        if preview and add_code and add_date:
-            df = _load_raw(add_code.strip().zfill(6))
-            if not df.empty:
-                df["date"] = pd.to_datetime(df["date"])
-                try:
-                    pts = pd.Timestamp(add_date.strip())
-                    full = df[df["date"] <= pts]
-                    if len(full) >= 10:
-                        fig = make_daily_chart(full, add_code.strip().zfill(6), bars=60, height=380,
-                                               show_brick=False, show_kdj=True)
-                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-                    else:
-                        st.warning("该日期前数据不足（需至少 10 根 K 线）")
-                except Exception as e:
-                    st.error(f"日期格式错误：{e}")
+        # 保存表单（st.form 确保值正确保持，clear_on_submit 保存后清空）
+        with st.form("pat_add_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                form_strat = st.selectbox("策略", ["b1", "brick", "b2", "b3"],
+                                           key="pat_form_strat",
+                                           format_func=lambda x: STRATEGY_LABELS.get(x, x.upper()))
+            with col2:
+                form_code = st.text_input("股票代码（6位）", key="pat_form_code",
+                                           placeholder="例：600519")
+            form_date = st.text_input("完美图形日期", key="pat_form_date",
+                                       placeholder="YYYY-MM-DD  例：2026-04-30")
+            form_desc = st.text_area("案例描述", key="pat_form_desc",
+                                      placeholder="描述该完美图形的特征，如：放量上涨缩量回调，白线在黄线上")
+            submitted = st.form_submit_button("💾 保存案例", type="primary", use_container_width=True)
+
+        if submitted:
+            if not form_code or not form_date or not form_desc:
+                st.error("请填写所有字段")
             else:
-                st.warning(f"未找到 {add_code} 的日线数据")
-        with col_save:
-            if st.button("💾 保存案例", key="pat_save", type="primary", use_container_width=True):
-                if not add_code or not add_date or not add_desc:
-                    st.error("请填写所有字段（代码、日期、描述）")
+                code_clean = form_code.strip().zfill(6)
+                df_check = _load_raw(code_clean)
+                if df_check.empty:
+                    st.error(f"未找到 {code_clean} 的日线数据，请确认代码正确")
                 else:
-                    code_clean = add_code.strip().zfill(6)
-                    # 检查代码数据存在
-                    df_check = _load_raw(code_clean)
-                    if df_check.empty:
-                        st.error(f"未找到 {code_clean} 的日线数据，请确认代码正确")
-                    else:
-                        # 加载原始 YAML，追加后保存
-                        full_yaml = _load_pattern_yaml()
-                        if "strategies" not in full_yaml:
-                            full_yaml = {"strategies": {s: [] for s in ["b1", "brick", "b2", "b3"]}}
-                        strategies = full_yaml.setdefault("strategies", {})
-                        if not isinstance(strategies.get(add_strat), list):
-                            strategies[add_strat] = []
-                        strategies[add_strat].append({
-                            "code": code_clean,
-                            "perfect_date": add_date.strip(),
-                            "description": add_desc.strip(),
-                        })
-                        _save_pattern_yaml(full_yaml)
-                        st.toast(f"✅ 已保存！{code_clean} @ {add_date.strip()} → {add_strat}", icon="✅")
+                    full_yaml = _load_pattern_yaml()
+                    if "strategies" not in full_yaml:
+                        full_yaml = {"strategies": {s: [] for s in ["b1", "brick", "b2", "b3"]}}
+                    strategies = full_yaml.setdefault("strategies", {})
+                    if not isinstance(strategies.get(form_strat), list):
+                        strategies[form_strat] = []
+                    strategies[form_strat].append({
+                        "code": code_clean,
+                        "perfect_date": form_date.strip(),
+                        "description": form_desc.strip(),
+                    })
+                    _save_pattern_yaml(full_yaml)
+                    st.toast(f"✅ 已保存！{code_clean} @ {form_date.strip()} → {form_strat}", icon="✅")
 
 
 # ── 主入口：动态标签页 ─────────────────────────────────────────────────────
