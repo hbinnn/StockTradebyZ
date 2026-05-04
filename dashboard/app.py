@@ -272,9 +272,14 @@ def _render_strategy_tab(strategy_name: str | None):
         sc = score or 0
         if sc < score_range[0] or sc > score_range[1]:
             continue
+        # 图形匹配数（≥0.7）
+        pms = [m for m in pattern_matches.get(code, []) if m.get("similarity", 0) >= 0.7]
+        match_count = len(pms)
+        match_str = f"{match_count}例" if match_count > 0 else "—"
+
         rows.append({
             "代码": code, "策略": s.upper(), "收盘": round(c.get("close", 0), 2),
-            "评分": score or 0, "判定": verdict, "点评": comment,
+            "评分": score or 0, "判定": verdict, "点评": comment, "匹配": match_str,
             "_code": code, "_strategy": s,
         })
 
@@ -296,7 +301,7 @@ def _render_strategy_tab(strategy_name: str | None):
     st.markdown(f"共 **{len(rows)}** 条　｜　☑️ 勾选左侧复选框查看个股详情")
     st.markdown("")
 
-    display_cols = ["代码", "策略", "收盘", "评分", "判定", "点评"]
+    display_cols = ["代码", "策略", "收盘", "评分", "判定", "匹配", "点评"]
     df = pd.DataFrame(rows)[display_cols]
 
     def _verdict_style(val):
@@ -315,6 +320,7 @@ def _render_strategy_tab(strategy_name: str | None):
             "收盘": st.column_config.NumberColumn(format="%.2f", width="small"),
             "评分": st.column_config.ProgressColumn(format="%.1f", min_value=1, max_value=5, width="medium"),
             "判定": st.column_config.TextColumn(width="small"),
+            "匹配": st.column_config.TextColumn(width="small"),
             "点评": st.column_config.TextColumn(width="large"),
         },
         column_order=display_cols,
