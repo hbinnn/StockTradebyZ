@@ -147,6 +147,22 @@ def _save_pattern_yaml(data: dict) -> None:
     os.replace(tmp, p)
 
 
+@st.cache_data(ttl=3600)
+def _load_stock_names() -> dict[str, str]:
+    """加载股票代码→名称映射。"""
+    p = _ROOT / "pipeline" / "stocklist.csv"
+    if not p.exists():
+        return {}
+    df = pd.read_csv(p, dtype=str)
+    names = {}
+    for _, row in df.iterrows():
+        symbol = str(row.get("symbol", "")).strip().zfill(6)
+        name = str(row.get("name", "")).strip()
+        if symbol and name:
+            names[symbol] = name
+    return names
+
+
 @st.cache_data(show_spinner=False)
 def _load_raw(code: str) -> pd.DataFrame:
     cfg = _load_cfg()
@@ -202,6 +218,7 @@ if not pick_date and candidates:
 review_map = _load_review_map(pick_date) if pick_date else {}
 suggestion = _load_suggestion(pick_date) if pick_date else None
 pattern_matches = _load_pattern_matches(pick_date) if pick_date else {}
+stock_names = _load_stock_names()
 
 if not candidates:
     st.info("暂无候选股票，请先运行量化初选。")
@@ -296,8 +313,11 @@ def _render_strategy_tab(strategy_name: str | None):
         match_count = len(pms)
         match_str = f"{match_count}例" if match_count > 0 else "—"
 
+        name = stock_names.get(code, "")
+
         rows.append({
-            "代码": code, "策略": s.upper(), "收盘": round(c.get("close", 0), 2),
+            "代码": code, "名称": name, "策略": s.upper(),
+            "收盘": round(c.get("close", 0), 2),
             "评分": score or 0, "判定": verdict, "点评": comment, "匹配": match_str,
             "_code": code, "_strategy": s,
         })
@@ -320,7 +340,7 @@ def _render_strategy_tab(strategy_name: str | None):
     st.markdown(f"共 **{len(rows)}** 条　｜　☑️ 勾选左侧复选框查看个股详情")
     st.markdown("")
 
-    display_cols = ["代码", "策略", "收盘", "评分", "判定", "匹配", "点评"]
+    display_cols = ["代码", "名称", "策略", "收盘", "评分", "判定", "匹配", "点评"]
     df = pd.DataFrame(rows)[display_cols]
 
     def _verdict_style(val):
@@ -335,6 +355,7 @@ def _render_strategy_tab(strategy_name: str | None):
         styled,
         column_config={
             "代码": st.column_config.TextColumn(width="small"),
+            "名称": st.column_config.TextColumn(width="small"),
             "策略": st.column_config.TextColumn(width="small"),
             "收盘": st.column_config.NumberColumn(format="%.2f", width="small"),
             "评分": st.column_config.ProgressColumn(format="%.1f", min_value=1, max_value=5, width="medium"),
@@ -362,7 +383,8 @@ def _render_strategy_tab(strategy_name: str | None):
     strategy = row["_strategy"]
 
     st.markdown(f'<hr class="section-divider">', unsafe_allow_html=True)
-    st.markdown(f"### 📈 {code}　<span class='strategy-badge strategy-{strategy}'>{strategy.upper()}</span>", unsafe_allow_html=True)
+    name_label = f" · {stock_names.get(code, '')}" if stock_names.get(code) else ""
+    st.markdown(f"### 📈 {code}{name_label}　<span class='strategy-badge strategy-{strategy}'>{strategy.upper()}</span>", unsafe_allow_html=True)
 
     feats = STRATEGY_FEATURES.get(strategy, {"show_kdj": False, "show_brick": False})
     show_kdj = feats.get("show_kdj", False)
@@ -524,8 +546,9 @@ def _render_pattern_library():
                 # 构建表格
                 table_rows = []
                 for idx, case in enumerate(cases):
+                    code = case.get("code", "")
                     table_rows.append({
-                        "代码": case.get("code", ""),
+                        "代码": code, "名称": stock_names.get(code, ""),
                         "日期": case.get("perfect_date", ""),
                         "描述": case.get("description", ""),
                         "_idx": idx,
@@ -535,6 +558,7 @@ def _render_pattern_library():
                     df,
                     column_config={
                         "代码": st.column_config.TextColumn(width="small"),
+                        "名称": st.column_config.TextColumn(width="small"),
                         "日期": st.column_config.TextColumn(width="small"),
                         "描述": st.column_config.TextColumn(width="large"),
                     },
@@ -552,7 +576,8 @@ def _render_pattern_library():
                     pdate = case.get("perfect_date", "")
                     desc = case.get("description", "")
                     st.markdown(f'<hr class="section-divider">', unsafe_allow_html=True)
-                    st.markdown(f"### {code} · {pdate}")
+                    name_lbl = f" · {stock_names.get(code, '')}" if stock_names.get(code) else ""
+                    st.markdown(f"### {code}{name_lbl} · {pdate}")
                     st.caption(desc)
                     case_df = _load_raw(code)
                     if not case_df.empty:
