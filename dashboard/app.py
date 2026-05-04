@@ -588,8 +588,9 @@ def _render_pattern_library():
                     # 删除按钮
                     if st.button("🗑️ 删除此案例", key=f"pat_del_{sel[0]}"):
                         full_yaml = _load_pattern_yaml()
-                        full_yaml.setdefault("strategies", {}).setdefault(view_strat, [])
-                        del full_yaml["strategies"][view_strat][sel[0]]
+                        strategies = full_yaml.setdefault("strategies", {})
+                        if isinstance(strategies.get(view_strat), list):
+                            del strategies[view_strat][sel[0]]
                         _save_pattern_yaml(full_yaml)
                         st.success("已删除，刷新页面生效")
                         st.rerun()
@@ -660,8 +661,10 @@ def _render_pattern_library():
                         full_yaml = _load_pattern_yaml()
                         if "strategies" not in full_yaml:
                             full_yaml = {"strategies": {s: [] for s in ["b1", "brick", "b2", "b3"]}}
-                        full_yaml.setdefault("strategies", {}).setdefault(add_strat, [])
-                        full_yaml["strategies"][add_strat].append({
+                        strategies = full_yaml.setdefault("strategies", {})
+                        if not isinstance(strategies.get(add_strat), list):
+                            strategies[add_strat] = []
+                        strategies[add_strat].append({
                             "code": code_clean,
                             "perfect_date": add_date.strip(),
                             "description": add_desc.strip(),
