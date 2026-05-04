@@ -280,77 +280,47 @@ def _render_strategy_tab(strategy_name: str | None):
         st.info("筛选条件下无候选股票。")
         return
 
-    # ── HTML 表格（代码可点击跳转详情）─────────────────────────────────────
-    st.markdown(f"共 **{len(rows)}** 条　｜　💡 点击股票代码查看详情")
+    # ── 表格（点击左侧复选框选中行查看详情）─────────────────────────────
+    st.markdown(f"共 **{len(rows)}** 条　｜　☑️ 勾选左侧复选框查看个股详情")
     st.markdown("")
 
-    v_colors = {"PASS": ("#d4f5e2", "#1a7f37"), "WATCH": ("#fff3cd", "#856404"), "FAIL": ("#f8d7da", "#721c24")}
+    df = pd.DataFrame(rows)
 
-    html_rows = []
-    for r in rows:
-        code = r["代码"]
-        strat = r["策略"]
-        score = r["评分"]
-        verdict = r["判定"]
-        comment = r["点评"]
-        close_p = r["收盘"]
-        bg, fg = v_colors.get(verdict, ("#f0f0f0", "#666"))
-        score_bar_pct = min(max((score or 0) / 5.0 * 100, 2), 100)
-        score_color = "#28a745" if score >= 4 else ("#ffc107" if score >= 3 else "#dc3545")
+    def _verdict_style(val):
+        if val == "PASS": return "background-color:#d4f5e2;color:#1a7f37;font-weight:600"
+        elif val == "WATCH": return "background-color:#fff3cd;color:#856404;font-weight:600"
+        elif val == "FAIL": return "background-color:#f8d7da;color:#721c24;font-weight:600"
+        return ""
 
-        # 评分小进度条
-        bar_html = f"""<div style="display:flex;align-items:center;gap:6px">
-            <span style="font-weight:600;color:{score_color};min-width:28px">{score:.1f}</span>
-            <div style="flex:1;background:#e9ecef;border-radius:3px;height:5px;min-width:40px">
-            <div style="background:{score_color};width:{score_bar_pct}%;height:5px;border-radius:3px"></div></div></div>"""
+    styled = df.style.map(_verdict_style, subset=["判定"])
 
-        # 判定色标
-        v_html = f'<span style="background:{bg};color:{fg};padding:2px 7px;border-radius:4px;font-weight:600;font-size:0.78rem">{verdict}</span>' if verdict else "—"
+    event = st.dataframe(
+        styled,
+        column_config={
+            "代码": st.column_config.TextColumn(width="small"),
+            "策略": st.column_config.TextColumn(width="small"),
+            "收盘": st.column_config.NumberColumn(format="%.2f", width="small"),
+            "评分": st.column_config.ProgressColumn(format="%.1f", min_value=1, max_value=5, width="medium"),
+            "判定": st.column_config.TextColumn(width="small"),
+            "点评": st.column_config.TextColumn(width="large"),
+        },
+        hide_index=True,
+        use_container_width=True,
+        height=min(38 * len(rows) + 38, 420),
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"table_{tab_key}",
+    )
 
-        # 代码可点击链接
-        code_link = f'<a href="?code={code}&strat={strat}&tab={tab_key}" style="color:#0969da;font-weight:700;text-decoration:none;font-size:0.92rem" title="点击查看{code}详情">{code}</a>'
-
-        html_rows.append(
-            f"""<tr style="border-bottom:1px solid #e9ecef">
-            <td style="padding:6px 8px;white-space:nowrap">{code_link}</td>
-            <td style="padding:6px 8px;font-size:0.82rem;color:#636c76;white-space:nowrap">{strat}</td>
-            <td style="padding:6px 8px;text-align:right;font-size:0.85rem;white-space:nowrap">{close_p:.2f}</td>
-            <td style="padding:6px 8px;min-width:100px">{bar_html}</td>
-            <td style="padding:6px 8px;white-space:nowrap">{v_html}</td>
-            <td style="padding:6px 8px;font-size:0.82rem;color:#636c76;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{comment}</td>
-            </tr>"""
-        )
-
-    table_html = f"""<table style="width:100%;border-collapse:collapse;font-size:0.88rem">
-    <thead><tr style="border-bottom:2px solid #d0d7de;color:#636c76;font-size:0.8rem">
-    <th style="text-align:left;padding:6px 8px">代码</th>
-    <th style="text-align:left;padding:6px 8px">策略</th>
-    <th style="text-align:right;padding:6px 8px">收盘</th>
-    <th style="text-align:left;padding:6px 8px">评分</th>
-    <th style="text-align:left;padding:6px 8px">判定</th>
-    <th style="text-align:left;padding:6px 8px">点评</th>
-    </tr></thead>
-    <tbody>{''.join(html_rows)}</tbody></table>"""
-
-    st.markdown(table_html, unsafe_allow_html=True)
-
-    # ── 通过 URL 参数跳转个股详情 ──────────────────────────────────────────
-    qp = st.query_params
-    sel_code = qp.get("code", "")
-    sel_strat = qp.get("strat", "")
-    sel_tab  = qp.get("tab", "")
-
-    if not sel_code or sel_tab != tab_key:
+    sel = event.selection.get("rows", []) if hasattr(event, "selection") else []
+    if not sel:
         return
-    # 在当前标签页的 rows 中查找选中股票
-    sel_row = next((r for r in rows if r["_code"] == sel_code and r["_strategy"] == sel_strat), None)
-    if not sel_row:
+    idx = sel[0]
+    if idx >= len(rows):
         return
-    row = sel_row
+    row = rows[idx]
     code = row["_code"]
     strategy = row["_strategy"]
-    # 清除 URL 参数（避免刷新后仍展开）
-    st.query_params.clear()
 
     st.markdown(f'<hr class="section-divider">', unsafe_allow_html=True)
     st.markdown(f"### 📈 {code}　<span class='strategy-badge strategy-{strategy}'>{strategy.upper()}</span>", unsafe_allow_html=True)
