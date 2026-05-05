@@ -1,0 +1,60 @@
+# backtest.yaml
+# AgentTrader 回测系统配置文件
+
+# ── 回测引擎参数 ────────────────────────────────────────────────────────
+engine:
+  start_date: "2023-01-01"
+  end_date: "2025-12-31"
+  initial_capital: 1000000
+  strategies:
+    - b1
+    - brick
+#   - b2
+#   - b3
+
+# ── 持仓管理 ────────────────────────────────────────────────────────────
+portfolio:
+  max_positions: 10
+  hold_days: 5
+  max_new_positions_per_day: 3
+
+# ── 选股信号参数 ────────────────────────────────────────────────────────
+signals:
+  data_dir: "./data/raw"
+  top_m: 5000
+  n_turnover_days: 43
+  ranking:
+    field: "turnover_n"          # turnover_n | brick_growth
+    ascending: false              # 降序（成交额大的优先）
+
+# ── 执行模拟 ────────────────────────────────────────────────────────────
+broker:
+  commission_bps: 2.5             # 佣金 万2.5（买卖双向）
+  stamp_tax_bps: 10.0             # 印花税 千1（仅卖出）
+  slippage_bps: 1.0               # 滑点 万1
+  t_plus_1: true                  # T+1 交收
+  respect_price_limits: true      # 尊重涨跌停限制
+  entry_price: "next_open"        # 买入价: next_open | same_close
+  exit_price: "same_close"        # 卖出价: same_close | next_open
+
+# ── 性能指标计算 ────────────────────────────────────────────────────────
+metrics:
+  risk_free_rate: 0.03            # 无风险利率（夏普比率用）
+
+# ── 止盈止损（per-strategy，null 表示不启用）───────────────────────────
+exit_rules:
+  b1:
+    stop_profit_pct: 0.10           # +10% 止盈
+    stop_loss_pct: -0.05            # -5% 止损
+  brick:
+    stop_profit_pct: 0.10
+    stop_loss_pct: -0.05
+
+# ── 大盘择时 ────────────────────────────────────────────────────────────
+market_filter:
+  enabled: true
+  index_code: "000001.SH"
+
+# ── 输出设置 ────────────────────────────────────────────────────────────
+output:
+  dir: "./data/backtest"

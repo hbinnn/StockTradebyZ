@@ -1,0 +1,6 @@
+# grid_b2.yaml
+# B2 策略粗网格：先锁定大区间，再用细网格精调
+strategy: b2
+param_grid:
+  daily_gain_threshold: [0.02, 0.0385, 0.05, 0.07]   # 涨幅门槛 2%~7%
+  j_max: [60.0, 80.0, 100.0]                           # J值上限

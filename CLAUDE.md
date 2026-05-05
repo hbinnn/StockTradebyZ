@@ -27,6 +27,17 @@ BAILIAN_API_KEY=<key>       # 阿里云百炼
 
 ## 常用命令
 
+### 回测
+```bash
+# 全量回测（需先下载上证指数数据）
+python -m pipeline.cli backtest --config config/backtest.yaml
+python -m pipeline.cli backtest --strategies b1 --start 2019-01-02 --end 2026-04-30
+
+# 参数优化
+python -m pipeline.cli optimize --grid config/grid_b1.yaml
+python -m pipeline.cli optimize --grid config/grid_b1.yaml --wf-windows 4  # Walk-Forward
+```
+
 ### 一键全流程
 ```bash
 python run_all.py                              # 使用本地 LM Studio（默认）
@@ -74,10 +85,33 @@ python pipeline/export_for_eastmoney.py --format csv
 # → http://localhost:8501
 ```
 
+### 回测（独立于选股流程）
+```bash
+# 全量回测（需先下载上证指数数据到 data/index/）
+python -m pipeline.cli backtest --config config/backtest.yaml
+python -m pipeline.cli backtest --strategies b1,b2,b3,brick --start 2019-01-02 --end 2026-04-30
+
+# 参数网格搜索
+python -m pipeline.cli optimize --config config/backtest.yaml --grid config/grid_b1.yaml
+
+# Walk-Forward 滚动窗口优化
+python -m pipeline.cli optimize --grid config/grid_b1.yaml --wf-windows 4
+
 ## 目录结构
 
 ```
 StockTradebyZ/
+  backtest/                  # 回测系统
+    config.py                # BacktestConfig + BrokerConfig
+    signal_loader.py         # 复用 pipeline 生成每日信号
+    engine.py                # 模拟引擎：每日循环（核算→退出→买入）
+    broker.py                # A股执行模拟（T+1、涨跌停、佣金印花税）
+    portfolio.py             # 持仓管理 + 净值记录
+    analyzer.py              # 绩效指标（夏普/卡玛/回撤/胜率/盈亏比）
+    exit_rules.py            # 策略专属止盈止损（知行线/砖型图）
+    optimizer.py             # 网格搜索 + Walk-Forward
+    reporter.py              # Console + HTML 报告
+    io.py                    # BacktestResult 序列化
   pipeline/                  # 核心管线
     fetch_kline.py           # 步骤1：Tushare 数据下载
     cli.py                   # 步骤2：量化初选 CLI 入口
@@ -125,11 +159,18 @@ StockTradebyZ/
     fetch_kline.yaml         # 数据抓取配置
     dashboard.yaml           # 看板配置
     perfect_patterns.yaml    # 图形匹配配置
+    backtest.yaml            # 回测配置（资金/持仓/择时/止盈止损)
+    grid_b1.yaml             # B1 参数网格
+    grid_b2.yaml             # B2 参数网格
+    grid_b3.yaml             # B3 参数网格
+    grid_brick.yaml          # Brick 参数网格
   data/                      # 运行数据（不提交）
+    index/                   # 大盘指数日线（上证）
     raw/                     # 原始日线 CSV
     candidates/              # 初选候选 JSON
     kline/{日期}/            # K 线图
     review/{日期}/           # AI 复评结果
+    backtest/                # 回测结果输出
     eastmoney/               # 东方财富导出
     logs/                    # 日志
   run_all.py                 # 一键全流程
@@ -156,6 +197,22 @@ _STRATEGY_RUNNERS = {}  # 装饰器自动填充
 ### Prompt 映射
 
 `BaseReviewer` 从配置的 `strategy_prompts` 字典加载策略→prompt 映射，无默认回退。缺 prompt 的策略候选会被跳过并报错。
+
+### 回测规则
+
+**买入**: 信号日 D → D+1 开盘价买入（T+1），跳空 > 3% 放弃（仅 B1）
+
+**B1/B2/B3 退出**:
+- 止损: `close <= 信号日最低价 × 0.99` → 全卖
+- 止盈: `close < zxdq` → 减半（可重复）；`close < zxdkx` → 全卖
+
+**砖型图退出**:
+- 连续 4 根红砖 → 减半（计数器重置）
+- 绿砖 → 全卖
+
+**大盘择时**: 上证指数知行线 `zxdq > zxdkx` 时才开新仓，否则只卖出
+
+**仓位限制**: 单票 ≤ 总资金 15%
 
 ### 关键设计模式
 - **Numba JIT 编译** — `@njit` 加速 KDJ 递推、砖型图核心、最大量非阴线计算

@@ -21,7 +21,7 @@ sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_DASH))
 
 from components.charts import make_daily_chart
-from components.backtest import render_backtest_button
+from components.backtest import render_backtest_button, calculate_performance
 
 # ── 常量 ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,13 @@ STRATEGY_FEATURES = {
 }
 VERDICT_COLORS = {"PASS": ("#d4f5e2", "#1a7f37"), "WATCH": ("#fff3cd", "#856404"), "FAIL": ("#f8d7da", "#721c24")}
 SCORE_COLORS  = {"PASS": "#1a7f37", "WATCH": "#856404", "FAIL": "#721c24", "": "#636c76"}
+
+
+def _fmt_pct(v) -> str:
+    if v is None:
+        return "N/A"
+    return f"{v * 100:+.1f}%"
+
 
 # ── 数据加载（缓存）──────────────────────────────────────────────────────────
 
@@ -488,11 +495,21 @@ def _render_strategy_tab(strategy_name: str | None):
                     case_code = m.get("case_code", "")
                     case_date = m.get("case_date", "")
                     desc = m.get("case_description", "")
+                    # 案例历史表现
+                    case_perf = calculate_performance(case_code, case_date)
+                    case_perf_str = ""
+                    if case_perf:
+                        case_perf_str = (
+                            f"案例后续: {_fmt_pct(case_perf.get('d5'))} / "
+                            f"{_fmt_pct(case_perf.get('d10'))} / "
+                            f"{_fmt_pct(case_perf.get('d20'))}"
+                        )
                     st.markdown(
                         f"""<span style="font-weight:600;font-size:0.9rem">{case_code}</span>
                         <span style="color:#636c76;font-size:0.82rem"> {case_date}</span>
                         <span style="color:{bar_c};font-weight:600;font-size:0.85rem;float:right">相似度 {sim:.2f}</span>
-                        <div style="color:#636c76;font-size:0.78rem;margin-bottom:4px">{desc[:80]}</div>""",
+                        <div style="color:#636c76;font-size:0.78rem;margin-bottom:2px">{desc[:80]}</div>
+                        <div style="color:#1a7f37;font-size:0.75rem;margin-bottom:2px">{case_perf_str}</div>""",
                         unsafe_allow_html=True
                     )
                     # 加载案例走势图（全量数据计算均线，再截断60根展示）
@@ -602,6 +619,21 @@ def _render_pattern_library():
                                 fig = make_daily_chart(full, code, bars=120, height=500,
                                                        show_brick=False, show_kdj=True)
                                 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+                                # 后续表现回测数据
+                                perf = calculate_performance(code, pdate)
+                                if perf:
+                                    st.markdown("**📈 后续表现**")
+                                    pc = st.columns(5)
+                                    pc[0].metric("1日", _fmt_pct(perf.get("d1")))
+                                    pc[1].metric("3日", _fmt_pct(perf.get("d3")))
+                                    pc[2].metric("5日", _fmt_pct(perf.get("d5")))
+                                    pc[3].metric("10日", _fmt_pct(perf.get("d10")))
+                                    pc[4].metric("20日", _fmt_pct(perf.get("d20")))
+                                    st.caption(
+                                        f"期间最高: {_fmt_pct(perf.get('max_return'))}  |  "
+                                        f"最低: {_fmt_pct(perf.get('min_return'))}"
+                                    )
                         except Exception:
                             st.caption("（图表生成失败）")
                     else:

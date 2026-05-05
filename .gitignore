@@ -46,3 +46,9 @@ Thumbs.db
 
 # Local scripts with API keys
 run_with_keys.sh
+
+# Claude Code internal files
+.agents/
+.claude/
+skills/
+skills-lock.json

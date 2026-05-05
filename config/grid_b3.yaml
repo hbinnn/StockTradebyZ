@@ -1,0 +1,7 @@
+# grid_b3.yaml
+# B3 策略粗网格：先锁定大区间，再用细网格精调
+strategy: b3
+param_grid:
+  max_change: [0.01, 0.02, 0.03]          # 小K线涨跌幅上限
+  max_amplitude: [0.05, 0.07, 0.10]       # 振幅上限
+  max_vol_ratio: [0.50, 0.70, 0.85]       # 缩量比例（<1=缩量）

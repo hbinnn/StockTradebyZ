@@ -76,7 +76,7 @@ def load_raw_data(
     for fname in os.listdir(data_dir):
         if not fname.lower().endswith(".csv"):
             continue
-        code = fname.rsplit(".", 1)[0]
+        code = fname.rsplit(".", 1)[0].zfill(6)
         fpath = os.path.join(data_dir, fname)
 
         df = pd.read_csv(fpath)
