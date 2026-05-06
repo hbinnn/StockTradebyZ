@@ -101,7 +101,7 @@ class BaseReviewer:
             strategy: str = candidate.get("strategy", "b1")
             out_file = out_dir / f"{code}_{strategy}.json"
 
-            if self.config.get("skip_existing", False) and out_file.exists():
+            if self.config.get("skip_existing", True) and out_file.exists():
                 print(f"[{i}/{len(candidates)}] {code} — 已存在，跳过。")
                 with open(out_file, encoding="utf-8") as f:
                     result = json.load(f)
